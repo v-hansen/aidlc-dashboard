@@ -1,0 +1,57 @@
+# AIDLC Dashboard
+
+A real-time dashboard for [AI-DLC v2](https://github.com/awslabs/aidlc-workflows/tree/v2) workflows. It reads the `aidlc/` folder that the AI-DLC engine writes to your project and visualizes workflow status: phases, stages, approval gates, learned rules, audit trail and consumption (tokens/credits) — including **cost per stage**.
+
+![AIDLC Dashboard — phases, stages and workflow progress](dashboard.png)
+
+## What's in this repo
+
+| File | What it is |
+|---|---|
+| `dashboard.html` | Standalone dashboard — a single file, no install, no server |
+| `aidlc-dashboard-x.y.z.vsix` | Extension for Kiro IDE / VS Code |
+
+Both render the same UI. Pick whichever fits your workflow.
+
+## Option 1 — Standalone HTML (no install)
+
+1. Download `dashboard.html` and open it in **Chrome, Edge or Opera**
+2. Click **Open aidlc Folder** and select the `aidlc/` folder of your project
+3. Done — it auto-refreshes every 5 seconds while the workflow runs
+
+Great for following a live workflow, workshops, or sharing progress with stakeholders. UI in English, Portuguese and Spanish (auto-detected, manual selector, English fallback).
+
+## Option 2 — Kiro IDE / VS Code extension
+
+1. Download the `.vsix`
+2. Command Palette (`Cmd/Ctrl+Shift+P`) → **Extensions: Install from VSIX**
+3. Open a project containing an `aidlc/` folder and run **`AIDLC: Open Dashboard`**
+
+No pickers needed: the extension detects the workspace automatically and refreshes instantly via file watcher.
+
+## Consumption & cost per stage
+
+The **Tokens** tab attributes consumption to each workflow stage (by matching timestamps against each stage's execution window):
+
+- **Kiro IDE** — exact **subscription credits**: total, per session and per stage, read from the local session files (`~/.kiro/sessions/`)
+- **Claude Code** — token counts and an **estimated USD cost** per stage, from local transcripts (`~/.claude/projects/`), priced by an adjustable reference table
+
+![Tokens tab — Kiro credits per session and per stage](credit.png)
+
+In the standalone HTML, point the Tokens tab at your transcripts folder; the extension finds it automatically. On macOS, press `Cmd+Shift+.` in the folder picker to reveal hidden folders.
+
+## Requirements
+
+- An AI-DLC v2 workflow (the dashboard reads its `aidlc/` folder) — any harness: Kiro IDE, Kiro CLI or Claude Code
+- Standalone HTML: a Chromium-based browser (File System Access API)
+- Extension: Kiro IDE or VS Code ≥ 1.80
+
+## Notes
+
+- Everything runs **locally** — no data leaves your machine
+- Workflow files are treated as untrusted input (HTML-escaped before rendering)
+- USD costs for Claude Code are estimates; for exact billing on AWS Bedrock, use Cost Explorer / CloudWatch
+
+## License
+
+MIT
