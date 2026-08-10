@@ -445,7 +445,7 @@ function renderLangSelector() {
 <script>
 // PART 1: Data structures and constants
 // Substituído pelo build.js com a versão do aidlc-dashboard-extension/package.json
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.2.2';
 
 const PHASES = [
   { id:'initialization', stages:['workspace-scaffold','workspace-detection','state-init'] },
@@ -510,6 +510,12 @@ async function readFileFromHandle(fileHandle) {
   return await file.text();
 }
 
+// Parse tolerante: o engine reescreve os JSONs durante o workflow e uma leitura
+// pode pegar o arquivo no meio da escrita — nunca deixe isso derrubar o refresh.
+function safeJsonParse(text) {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 async function findFile(dirHandle, path) {
   const parts = path.split('/').filter(Boolean);
   let current = dirHandle;
@@ -553,34 +559,53 @@ async function loadDashboardData(rootHandle) {
   // Read intents.json
   const intentsFile = await findFile(rootHandle, `spaces/${data.activeSpace}/intents/intents.json`);
   if (!intentsFile) { data.errorKey = 'notAidlc'; return data; }
-  const intentsJson = JSON.parse(await readFileFromHandle(intentsFile));
+  const intentsJson = safeJsonParse(await readFileFromHandle(intentsFile));
+  if (!intentsJson) {
+    // intents.json ilegível neste instante: preserva os dados do refresh anterior
+    if (dashboardData && dashboardData.intents && dashboardData.intents.length) return dashboardData;
+    data.errorKey = 'notAidlc';
+    return data;
+  }
 
   // For each intent, load state and runtime-graph
+  // Cada intent é isolado: um arquivo quebrado não derruba os demais nem o refresh
   for (const intent of intentsJson) {
-    const intentDir = await findDir(rootHandle, `spaces/${data.activeSpace}/intents/${intent.dirName}`);
-    if (!intentDir) continue;
+    try {
+      const intentDir = await findDir(rootHandle, `spaces/${data.activeSpace}/intents/${intent.dirName}`);
+      if (!intentDir) continue;
 
-    const stateFile = await findFile(intentDir, 'aidlc-state.md');
-    const graphFile = await findFile(intentDir, 'runtime-graph.json');
-    const recoveryFile = await findFile(intentDir, '.aidlc-recovery.md');
+      const stateFile = await findFile(intentDir, 'aidlc-state.md');
+      const graphFile = await findFile(intentDir, 'runtime-graph.json');
+      const recoveryFile = await findFile(intentDir, '.aidlc-recovery.md');
 
-    const intentData = { ...intent, state: null, graph: null, recovery: null, audit: [] };
+      const intentData = { ...intent, state: null, graph: null, recovery: null, audit: [] };
 
-    if (stateFile) intentData.state = await readFileFromHandle(stateFile);
-    if (graphFile) intentData.graph = JSON.parse(await readFileFromHandle(graphFile));
-    if (recoveryFile) intentData.recovery = await readFileFromHandle(recoveryFile);
+      if (stateFile) intentData.state = await readFileFromHandle(stateFile);
+      if (graphFile) intentData.graph = safeJsonParse(await readFileFromHandle(graphFile));
+      if (recoveryFile) intentData.recovery = await readFileFromHandle(recoveryFile);
 
-    // Load audit files
-    const auditDir = await findDir(intentDir, 'audit');
-    if (auditDir) {
-      const auditFiles = await listFiles(auditDir);
-      for (const af of auditFiles) {
-        if (af.kind === 'file' && af.name.endsWith('.md')) {
-          intentData.audit.push({ name: af.name, content: await readFileFromHandle(af.handle) });
+      // Graph ilegível neste ciclo? Reaproveita o do refresh anterior (melhor que zerar)
+      if (!intentData.graph && dashboardData) {
+        const prev = (dashboardData.intents || []).find(i => i.dirName === intent.dirName);
+        if (prev && prev.graph) intentData.graph = prev.graph;
+      }
+
+      // Load audit files
+      const auditDir = await findDir(intentDir, 'audit');
+      if (auditDir) {
+        const auditFiles = await listFiles(auditDir);
+        for (const af of auditFiles) {
+          if (af.kind === 'file' && af.name.endsWith('.md')) {
+            try {
+              intentData.audit.push({ name: af.name, content: await readFileFromHandle(af.handle) });
+            } catch { /* arquivo de audit em escrita — ignora neste ciclo */ }
+          }
         }
       }
+      data.intents.push(intentData);
+    } catch (e) {
+      console.warn('intent ilegível neste ciclo:', intent.dirName, e);
     }
-    data.intents.push(intentData);
   }
 
   // Load memory (project rules)
@@ -630,9 +655,9 @@ function parseState(stateMarkdown) {
     }
   }
 
-  // Parse stage progress (checkboxes)
+  // Parse stage progress (checkboxes) — aceita —, – ou - como separador
   s.stages = {};
-  const stageRx = /- \[(.)\] (\S+) — (\w+)/g;
+  const stageRx = /- \[(.)\] (\S+) [—–-] (\w+)/g;
   let sm;
   while ((sm = stageRx.exec(stateMarkdown))) {
     const status = sm[1] === 'x' ? 'done' : sm[1] === '-' ? 'active' : sm[1] === '?' ? 'awaiting' : sm[1] === 'R' ? 'revising' : sm[1] === 'S' ? 'skipped' : 'pending';
@@ -710,9 +735,20 @@ function renderDashboard(data) {
     intentSelector += '</div>';
   }
 
-  const completedStages = graph ? graph.stages.filter(s => s.outcome === 'approved').length : 0;
-  const totalStages = parseInt(state.totalStages) || 25;
-  const progress = Math.round((completedStages / totalStages) * 100);
+  // Progresso ciente do escopo: conta apenas stages com ação EXECUTE no plano
+  // (os SKIP do escopo saem do denominador). Fonte: checkboxes do aidlc-state.md,
+  // que o engine atualiza em tempo real — o runtime-graph fica como fallback.
+  const stageEntries = Object.values(state.stages || {});
+  const planned = stageEntries.filter(s => s.action === 'EXECUTE');
+  let completedStages, totalStages;
+  if (planned.length) {
+    completedStages = planned.filter(s => s.status === 'done').length;
+    totalStages = planned.length;
+  } else {
+    completedStages = graph ? graph.stages.filter(s => s.outcome === 'approved').length : 0;
+    totalStages = parseInt(state.totalStages) || 25;
+  }
+  const progress = totalStages ? Math.round((completedStages / totalStages) * 100) : 0;
 
   return `
     <div class="header">
@@ -1505,6 +1541,12 @@ async function refreshData() {
     if (indicator) indicator.textContent = t('updatedAt') + ' ' + new Date().toLocaleTimeString(LOCALES[lang] || 'en-US');
   } catch (err) {
     console.warn('Falha ao atualizar:', err);
+    // Nunca falhe em silêncio: mostra o aviso no indicador (o timer segue tentando)
+    const indicator = document.getElementById('refresh-indicator');
+    if (indicator) {
+      indicator.textContent = t('updWarn');
+      indicator.title = String(err && err.message || err);
+    }
   }
 }
 
@@ -1577,6 +1619,7 @@ Object.assign(I18N.pt = I18N.pt || {}, {
   clone:'Clone', stStagesDone:'Stages Concluídos', stCurrentStage:'Stage Atual', stActiveAgent:'Agente Ativo', stDepth:'Profundidade',
   overallProgress:'Progresso Geral', lblStart:'Início', lblUpdated:'Atualizado', updatedAt:'Atualizado às',
   btnPause:'⏸ Pausar', btnResume:'▶ Retomar', btnRefresh:'🔄 Atualizar',
+  updWarn:'⚠️ Falha ao atualizar — tentando de novo em 5s',
   tabPhases:'Fases', tabStages:'Stages', tabSensors:'Sensores', tabKnowledge:'Conhecimento', tabAudit:'Auditoria', tabTokens:'Tokens', tabHelp:'Ajuda',
   badgeRunning:'Em Execução', badgeCompleted:'Concluído', badgePaused:'Pausado', badgeFailed:'Falhou', badgeUnknown:'Desconhecido',
   phDone:'Concluída', phActive:'Ativa', phPending:'Pendente', phSkipped:'Pulada',
@@ -1649,6 +1692,7 @@ Object.assign(I18N.en = I18N.en || {}, {
   clone:'Clone', stStagesDone:'Stages Completed', stCurrentStage:'Current Stage', stActiveAgent:'Active Agent', stDepth:'Depth',
   overallProgress:'Overall Progress', lblStart:'Started', lblUpdated:'Updated', updatedAt:'Updated at',
   btnPause:'⏸ Pause', btnResume:'▶ Resume', btnRefresh:'🔄 Refresh',
+  updWarn:'⚠️ Refresh failed — retrying in 5s',
   tabPhases:'Phases', tabStages:'Stages', tabSensors:'Sensors', tabKnowledge:'Knowledge', tabAudit:'Audit', tabTokens:'Tokens', tabHelp:'Help',
   badgeRunning:'Running', badgeCompleted:'Completed', badgePaused:'Paused', badgeFailed:'Failed', badgeUnknown:'Unknown',
   phDone:'Completed', phActive:'Active', phPending:'Pending', phSkipped:'Skipped',
@@ -1721,6 +1765,7 @@ Object.assign(I18N.es = I18N.es || {}, {
   clone:'Clone', stStagesDone:'Stages Completados', stCurrentStage:'Stage Actual', stActiveAgent:'Agente Activo', stDepth:'Profundidad',
   overallProgress:'Progreso General', lblStart:'Inicio', lblUpdated:'Actualizado', updatedAt:'Actualizado a las',
   btnPause:'⏸ Pausar', btnResume:'▶ Reanudar', btnRefresh:'🔄 Actualizar',
+  updWarn:'⚠️ Error al actualizar — reintentando en 5s',
   tabPhases:'Fases', tabStages:'Stages', tabSensors:'Sensores', tabKnowledge:'Conocimiento', tabAudit:'Auditoría', tabTokens:'Tokens', tabHelp:'Ayuda',
   badgeRunning:'En Ejecución', badgeCompleted:'Completado', badgePaused:'Pausado', badgeFailed:'Falló', badgeUnknown:'Desconocido',
   phDone:'Completada', phActive:'Activa', phPending:'Pendiente', phSkipped:'Omitida',
