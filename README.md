@@ -10,8 +10,9 @@ A real-time dashboard for [AI-DLC v2](https://github.com/awslabs/aidlc-workflows
 |---|---|
 | `dashboard.html` | Standalone dashboard — a single file, no install, no server |
 | `aidlc-dashboard-x.y.z.vsix` | Extension for Kiro IDE / VS Code |
+| `web/` | Web-server dashboard — runs in any browser via a small Node.js backend (`npm run server {path}`) |
 
-Both render the same UI. Pick whichever fits your workflow.
+All three render the same UI. Pick whichever fits your workflow.
 
 ## Option 1 — Standalone HTML (no install)
 
@@ -29,6 +30,27 @@ Great for following a live workflow, workshops, or sharing progress with stakeho
 
 No pickers needed: the extension detects the workspace automatically and refreshes instantly via file watcher.
 
+## Option 3 — Web server (any browser)
+
+For anyone not using Kiro, Cursor, VS Code or another editor fork: run the dashboard as a small local web app and open it in **any** modern browser (no File System Access API needed).
+
+```bash
+cd web
+npm install
+
+# Start with your project path (npm needs the `--` to forward the path)
+npm run server -- /path/to/your/project
+
+# Or start without a path — it prompts you to paste the project path
+npm run server
+```
+
+Then open the URL printed in your terminal (base `http://localhost:3939`). The server auto-increments to the next free port, so you can run several projects at once (e.g. `3939`, `3940`, ...). Override the base port with the `PORT` env variable.
+
+Updates are pushed **instantly over WebSocket** by a file watcher on the `aidlc/` folder — no 5-second polling. It renders the same UI (phases, stages, workflow, knowledge, audit, tokens) as the other two options and stays **fully local**. Requires **Node.js ≥ 18** and works in any modern browser.
+
+See [`web/README.md`](web/README.md) for the quick-start and REST API details.
+
 ## Consumption & cost per stage
 
 The **Tokens** tab attributes consumption to each workflow stage (by matching timestamps against each stage's execution window):
@@ -45,6 +67,7 @@ In the standalone HTML, point the Tokens tab at your transcripts folder; the ext
 - An AI-DLC v2 workflow (the dashboard reads its `aidlc/` folder) — any harness: Kiro IDE, Kiro CLI or Claude Code
 - Standalone HTML: a Chromium-based browser (File System Access API)
 - Extension: Kiro IDE or VS Code ≥ 1.80
+- Web server: Node.js ≥ 18 and any modern browser (no File System Access API needed)
 
 ## Notes
 
