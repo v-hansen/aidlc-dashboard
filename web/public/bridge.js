@@ -31,7 +31,7 @@ function connectWebSocket() {
         ws.send(JSON.stringify({ type: 'ready' }));
       } else {
         // No project yet — show the project-path selector screen.
-        document.getElementById('app').innerHTML = renderProjectSelector();
+        showProjectSelector();
       }
     } else if (msg.type === 'data') {
       dashboardData = msg.dashboard;
@@ -61,6 +61,37 @@ function connectWebSocket() {
 
 // ─── Project-path selector screen ───────────────────────────────────────────
 
+// Render the selector into #app AND wire up its event listeners. Recent-path
+// rows use data attributes + addEventListener rather than string-interpolated
+// inline onclick handlers, so a stored path containing quotes or backslashes
+// cannot break out of the handler (the value only ever lives in the DOM as
+// escaped text / a data attribute, never as executable JS source).
+function showProjectSelector() {
+  const app = document.getElementById('app');
+  app.innerHTML = renderProjectSelector();
+
+  const input = document.getElementById('project-path-input');
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') selectProjectFromInput();
+    });
+  }
+  const goBtn = app.querySelector('[data-action="go"]');
+  if (goBtn) goBtn.addEventListener('click', selectProjectFromInput);
+
+  app.querySelectorAll('[data-recent-path]').forEach((row) => {
+    const p = row.getAttribute('data-recent-path');
+    row.addEventListener('click', () => selectProject(p));
+    const del = row.querySelector('[data-action="remove"]');
+    if (del) {
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeRecentPath(p);
+      });
+    }
+  });
+}
+
 function renderProjectSelector() {
   const savedPaths = loadRecentPaths();
   let recentsHtml = '';
@@ -69,9 +100,9 @@ function renderProjectSelector() {
       <div style="margin-top:16px;text-align:left;width:100%;max-width:500px">
         <h3 style="margin-bottom:8px">${t('recentProjects')}</h3>
         ${savedPaths.map(p => `
-          <div class="knowledge-item" style="cursor:pointer;display:flex;align-items:center;gap:8px" onclick="selectProject('${p.replace(/'/g, "\\'")}')">
+          <div class="knowledge-item" style="cursor:pointer;display:flex;align-items:center;gap:8px" data-recent-path="${esc(p)}">
             <span style="flex:1;font-size:0.82rem;word-break:break-all">${esc(p)}</span>
-            <button class="info-btn" onclick="event.stopPropagation();removeRecentPath('${p.replace(/'/g, "\\'")}')" title="✕">✕</button>
+            <button class="info-btn" data-action="remove" title="✕">✕</button>
           </div>
         `).join('')}
       </div>`;
@@ -86,9 +117,8 @@ function renderProjectSelector() {
       <div style="display:flex;gap:8px;width:100%;max-width:500px">
         <input id="project-path-input" type="text" placeholder="/path/to/your/project"
           style="flex:1;padding:12px 16px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:0.9rem"
-          value="${esc(currentProjectPath || '')}"
-          onkeydown="if(event.key==='Enter')selectProjectFromInput()">
-        <button class="load-btn" onclick="selectProjectFromInput()" style="padding:12px 20px">→</button>
+          value="${esc(currentProjectPath || '')}">
+        <button class="load-btn" data-action="go" style="padding:12px 20px">→</button>
       </div>
       ${recentsHtml}
       <p style="color:var(--text-muted);font-size:0.75rem;margin-top:12px">
@@ -134,7 +164,7 @@ function saveRecentPath(p) {
 function removeRecentPath(p) {
   const paths = loadRecentPaths().filter(x => x !== p);
   try { localStorage.setItem('aidlc-recent-paths', JSON.stringify(paths)); } catch {}
-  document.getElementById('app').innerHTML = renderProjectSelector();
+  showProjectSelector();
 }
 
 // ─── Overrides of core.js environment functions ─────────────────────────────
@@ -142,7 +172,7 @@ function removeRecentPath(p) {
 // openFolder: in the web context, show the project selector instead of the
 // File System Access directory picker.
 function openFolder() {
-  document.getElementById('app').innerHTML = renderProjectSelector();
+  showProjectSelector();
 }
 
 // openTokensFolder / loadTokenData: ask the server to (re)read the transcripts.

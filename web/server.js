@@ -35,6 +35,10 @@ const wss = new WebSocketServer({ server });
 let projectPath = process.argv[2] || null; // may be provided via CLI
 let watcher = null;
 let debounceTimer = null;
+// Last successfully-loaded dashboard snapshot. The watcher fires reads *during*
+// writes, so a file can be momentarily unreadable/half-written; we carry the
+// previous good data forward instead of blanking the UI (matches dashboard.html).
+let lastDashboard = null;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -75,6 +79,10 @@ async function loadDashboard() {
   const spaceDir = path.join(root, 'spaces', data.activeSpace);
   const intentsJson = await readJson(path.join(spaceDir, 'intents', 'intents.json'));
   if (!intentsJson) {
+    // intents.json unreadable this instant (missing or half-written during a
+    // write): carry forward the previous good snapshot rather than blanking to
+    // notAidlc. Matches dashboard.html's mid-write tolerance.
+    if (lastDashboard && lastDashboard.intents && lastDashboard.intents.length) return lastDashboard;
     data.errorKey = 'notAidlc';
     return data;
   }
@@ -86,6 +94,13 @@ async function loadDashboard() {
     intentData.state = await readText(path.join(intentDir, 'aidlc-state.md'));
     intentData.graph = await readJson(path.join(intentDir, 'runtime-graph.json'));
     intentData.recovery = await readText(path.join(intentDir, '.aidlc-recovery.md'));
+
+    // Graph unreadable this cycle? Reuse the previous cycle's graph (better than
+    // nulling it while a runtime-graph.json is being rewritten).
+    if (!intentData.graph && lastDashboard) {
+      const prev = (lastDashboard.intents || []).find(i => i.dirName === intent.dirName);
+      if (prev && prev.graph) intentData.graph = prev.graph;
+    }
 
     try {
       const auditDir = path.join(intentDir, 'audit');
@@ -124,7 +139,14 @@ async function loadDashboard() {
       break;
     }
   }
+  // Preserve the previous cycle's grid if this cycle found none (file in write).
+  if (!data.scopeGrid && lastDashboard && lastDashboard.scopeGrid) {
+    data.scopeGrid = lastDashboard.scopeGrid;
+    data.scopeGridSource = lastDashboard.scopeGridSource;
+  }
 
+  // Remember this good snapshot so the next mid-write read can carry it forward.
+  lastDashboard = data;
   return data;
 }
 
@@ -143,23 +165,47 @@ async function loadTokens() {
   return agg;
 }
 
+// Claude Code stores per-project transcripts under ~/.claude/projects/<slug>,
+// where <slug> is the absolute project path with every non-alphanumeric run
+// replaced by '-' (e.g. /Users/me/app -> -Users-me-app). The exact scheme is
+// version-dependent, so rather than trust one guess we try the common
+// encodings first, then fall back to scanning the projects dir and matching by
+// normalized slug. If nothing matches, Claude tokens are simply absent (no
+// error), which is the correct behavior when the project was never used with
+// Claude Code.
+function claudeSlug(p) {
+  return p.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+async function findClaudeDir(projectsDir, targetPath) {
+  const candidates = [
+    targetPath.replace(/\//g, '-'),
+    claudeSlug(targetPath),
+  ];
+  for (const c of candidates) {
+    const candidate = path.join(projectsDir, c);
+    try { await fs.access(candidate); return candidate; } catch { }
+  }
+  // Fallback: scan and match on the normalized slug so we tolerate differences
+  // in how leading/trailing separators or dots were encoded.
+  const wanted = claudeSlug(targetPath).replace(/^-+|-+$/g, '');
+  let entries = [];
+  try {
+    entries = await fs.readdir(projectsDir, { withFileTypes: true });
+  } catch { return null; }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const norm = e.name.replace(/[^a-zA-Z0-9]/g, '-').replace(/^-+|-+$/g, '');
+    if (norm === wanted) return path.join(projectsDir, e.name);
+  }
+  return null;
+}
+
 async function loadClaudeTokens(agg) {
   if (!projectPath) return;
   const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-  const candidates = [
-    projectPath.replace(/\//g, '-'),
-    projectPath.replace(/[^a-zA-Z0-9-]/g, '-'),
-  ];
 
-  let dir = null;
-  for (const c of candidates) {
-    const candidate = path.join(projectsDir, c);
-    try {
-      await fs.access(candidate);
-      dir = candidate;
-      break;
-    } catch { }
-  }
+  const dir = await findClaudeDir(projectsDir, projectPath);
   if (!dir) return;
 
   let files = [];
@@ -312,18 +358,21 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'setProject') {
       projectPath = msg.path;
+      lastDashboard = null; // new project — don't carry the old project's data
       startWatcher();
       const dashboard = await loadDashboard();
       const tokens = await loadTokens();
       ws.send(JSON.stringify({ type: 'data', dashboard }));
       ws.send(JSON.stringify({ type: 'tokens', tokens }));
     } else if (msg.type === 'ready' || msg.type === 'refresh') {
+      // Push dashboard AND tokens on every refresh (and initial ready). A watch
+      // event on aidlc/ signals a workflow step, which typically also produced
+      // new Claude/Kiro transcript usage; refreshing tokens here keeps the
+      // Tokens/credits panels live instead of frozen at first load.
       const dashboard = await loadDashboard();
       ws.send(JSON.stringify({ type: 'data', dashboard }));
-      if (msg.type === 'ready') {
-        const tokens = await loadTokens();
-        ws.send(JSON.stringify({ type: 'tokens', tokens }));
-      }
+      const tokens = await loadTokens();
+      ws.send(JSON.stringify({ type: 'tokens', tokens }));
     } else if (msg.type === 'refreshTokens') {
       const tokens = await loadTokens();
       ws.send(JSON.stringify({ type: 'tokens', tokens }));
@@ -342,6 +391,7 @@ app.post('/api/project', async (req, res) => {
   const { path: p } = req.body;
   if (!p) return res.status(400).json({ error: 'path is required' });
   projectPath = p;
+  lastDashboard = null; // new project — don't carry the old project's data
   startWatcher();
   broadcast('refresh');
   res.json({ ok: true, path: projectPath });
@@ -366,7 +416,7 @@ function isPortFree(port) {
     const srv = net.createServer();
     srv.once('error', () => resolve(false));
     srv.once('listening', () => { srv.close(); resolve(true); });
-    srv.listen(port);
+    srv.listen(port, '127.0.0.1');
   });
 }
 
@@ -413,7 +463,12 @@ async function main() {
   // Find a free port (allows multiple instances).
   const port = await findFreePort(BASE_PORT);
 
-  server.listen(port, () => {
+  // Bind to loopback only. This tool has no authentication and reads arbitrary
+  // local paths (including ~/.claude and ~/.kiro transcripts) for whatever
+  // project path a client sets, so it must stay local-only — the project's
+  // stated invariant. Binding to 127.0.0.1 keeps it unreachable from other
+  // hosts on the network.
+  server.listen(port, '127.0.0.1', () => {
     console.log(`\n  🔬 AIDLC Dashboard Web`);
     console.log(`  ─────────────────────────────────`);
     console.log(`  Project: ${projectPath}`);
