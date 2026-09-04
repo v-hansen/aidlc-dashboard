@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI-DLC v2 Dashboard</title>
+<title>AI-DLC Dashboard</title>
 <style>
 :root {
   --bg: #0f1117;
@@ -372,6 +372,68 @@ button:focus-visible, [tabindex]:focus-visible {
   text-align: center; color: var(--text-muted);
   font-size: 0.72rem; margin-top: 24px; padding: 12px 0;
 }
+
+/* ---- Workflow-shape graph (aba Workflow) ---- */
+.wf-head { margin-bottom: 12px; }
+.wf-title { color: var(--text); text-transform: none; letter-spacing: 0; font-size: 1.05rem; }
+.wf-sub { color: var(--text-muted); font-size: 0.8rem; margin-top: 2px; }
+.wf-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.wf-chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  padding: 7px 12px; border-radius: 999px; font-size: 0.8rem; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; transition: border-color .15s, box-shadow .15s;
+}
+.wf-chip:hover { border-color: var(--accent); }
+.wf-chip.active { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.wf-chip-n { color: var(--green); font-weight: 700; margin-left: 4px; }
+.wf-chip-tag { color: var(--text-muted); font-size: 0.72rem; }
+.wf-chip-real { color: var(--yellow); font-size: 0.7rem; }
+
+.wf-board-wrap { position: relative; margin: 4px 0; }
+.wf-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+.wf-edges path { fill: none; stroke: var(--border); stroke-width: 1.3; stroke-dasharray: 4 3; opacity: 0.6; }
+.wf-edges path.live { stroke: var(--green); opacity: 0.55; stroke-dasharray: none; stroke-width: 1.5; }
+
+.wf-board { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: start; }
+.wf-col-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center;
+  color: var(--text-muted); font-size: 0.72rem; letter-spacing: 1.5px; margin-bottom: 10px; text-transform: uppercase;
+}
+.wf-card {
+  border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 9px 11px; margin-bottom: 9px;
+  background: var(--surface); position: relative;
+}
+.wf-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.68rem; color: var(--text-muted); margin-bottom: 2px; }
+.wf-name { font-size: 0.78rem; font-weight: 600; }
+.wf-card.skip { background: var(--bg); border-style: dashed; border-color: var(--border); opacity: 0.5; }
+/* accent por fase quando EXECUTE */
+.wf-card.exec.initialization { border-color: var(--blue); background: var(--blue-bg); }
+.wf-card.exec.ideation       { border-color: var(--green); background: var(--green-bg); }
+.wf-card.exec.inception      { border-color: var(--yellow); background: var(--yellow-bg); }
+.wf-card.exec.construction   { border-color: var(--purple); background: var(--accent-glow); }
+.wf-card.exec.operation      { border-color: var(--red); background: var(--red-bg); }
+/* estado real do intent (só quando o scope exibido é o real) */
+.wf-card.done { box-shadow: inset 0 0 0 1.5px var(--green); }
+.wf-card.done::after { content: "✓"; position: absolute; top: 6px; right: 8px; color: var(--green); font-size: 0.8rem; font-weight: 700; }
+.wf-card.current { box-shadow: inset 0 0 0 1.5px var(--yellow); }
+.wf-card.current::after { content: "▶"; position: absolute; top: 6px; right: 8px; color: var(--yellow); font-size: 0.72rem; }
+
+.wf-caption { margin-top: 18px; font-size: 0.82rem; color: var(--text-muted); line-height: 1.6; }
+.wf-caption b { color: var(--text); }
+.wf-hint { color: var(--yellow); }
+.wf-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: 0.75rem; color: var(--text-muted); align-items: center; }
+.wf-swatch { display: inline-block; width: 13px; height: 13px; border-radius: 4px; margin-right: 6px; vertical-align: -2px; border: 1.5px solid var(--border); }
+.wf-swatch.exec { border-color: var(--green); background: var(--green-bg); }
+.wf-swatch.skip { border-style: dashed; background: transparent; opacity: 0.6; }
+.wf-swatch.done { border-color: var(--green); box-shadow: inset 0 0 0 2px var(--green); }
+.wf-swatch.current { border-color: var(--yellow); box-shadow: inset 0 0 0 2px var(--yellow); }
+.wf-vgate {
+  margin-top: 4px; text-align: center; font-size: 0.68rem; color: var(--red);
+  border: 1px dashed var(--red); border-radius: var(--radius-sm); padding: 4px 6px;
+  background: var(--red-bg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.wf-src { margin-top: 6px; font-size: 0.72rem; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>
 </head>
 <body>
@@ -445,12 +507,12 @@ function renderLangSelector() {
 <script>
 // PART 1: Data structures and constants
 // Substituído pelo build.js com a versão do aidlc-dashboard-extension/package.json
-const APP_VERSION = '0.2.2';
+const APP_VERSION = '0.2.3';
 
 const PHASES = [
   { id:'initialization', stages:['workspace-scaffold','workspace-detection','state-init'] },
   { id:'ideation', stages:['intent-capture','market-research','feasibility','scope-definition','team-formation','rough-mockups','approval-handoff'] },
-  { id:'inception', stages:['reverse-engineering','practices-discovery','requirements-analysis','user-stories','refined-mockups','application-design','units-generation','delivery-planning'] },
+  { id:'inception', stages:['reverse-engineering','practices-discovery','requirements-analysis','user-stories','refined-mockups','domain-design','units-generation','contract-design','delivery-planning'] },
   { id:'construction', stages:['functional-design','nfr-requirements','nfr-design','infrastructure-design','code-generation','build-and-test','ci-pipeline'] },
   { id:'operation', stages:['deployment-pipeline','environment-provisioning','deployment-execution','observability-setup','incident-response','performance-validation','feedback-optimization'] }
 ];
@@ -473,31 +535,32 @@ const STAGE_INFO = {
   'market-research': { desc:'Pesquisa mercado e soluções similares', agent:'aidlc-product-agent' },
   'feasibility': { desc:'Avalia viabilidade técnica e de negócio', agent:'aidlc-architect-agent' },
   'scope-definition': { desc:'Define escopo, limites e exclusões', agent:'aidlc-product-agent' },
-  'team-formation': { desc:'Define composição e papéis do time', agent:'orchestrator' },
+  'team-formation': { desc:'Define composição e papéis do time', agent:'aidlc-delivery-agent' },
   'rough-mockups': { desc:'Cria mockups iniciais de baixa fidelidade', agent:'aidlc-design-agent' },
-  'approval-handoff': { desc:'Gate de aprovação para seguir para Concepção', agent:'orchestrator' },
+  'approval-handoff': { desc:'Gate de aprovação para seguir para Concepção', agent:'aidlc-delivery-agent' },
   'reverse-engineering': { desc:'Analisa código existente e documenta arquitetura atual', agent:'aidlc-developer-agent' },
   'practices-discovery': { desc:'Descobre práticas do time e afirma regras de trabalho', agent:'aidlc-pipeline-deploy-agent' },
   'requirements-analysis': { desc:'Analisa requisitos funcionais e não-funcionais', agent:'aidlc-product-agent' },
   'user-stories': { desc:'Cria user stories com critérios de aceitação BDD', agent:'aidlc-product-agent' },
   'refined-mockups': { desc:'Refina mockups com base nos requisitos', agent:'aidlc-design-agent' },
-  'application-design': { desc:'Design de arquitetura da aplicação e ADRs', agent:'aidlc-architect-agent' },
-  'units-generation': { desc:'Gera unidades de trabalho (Bolts) para construção', agent:'aidlc-developer-agent' },
-  'delivery-planning': { desc:'Planeja sequência de entrega dos Bolts', agent:'aidlc-product-agent' },
-  'functional-design': { desc:'Design funcional detalhado por unidade', agent:'aidlc-developer-agent' },
-  'nfr-requirements': { desc:'Requisitos não-funcionais detalhados', agent:'aidlc-quality-agent' },
+  'domain-design': { desc:'Design de domínio, componentes e ADRs', agent:'aidlc-architect-agent' },
+  'units-generation': { desc:'Gera unidades de trabalho (Bolts) para construção', agent:'aidlc-architect-agent' },
+  'contract-design': { desc:'Define contratos/interfaces entre unidades', agent:'aidlc-architect-agent' },
+  'delivery-planning': { desc:'Planeja sequência de entrega dos Bolts', agent:'aidlc-delivery-agent' },
+  'functional-design': { desc:'Design funcional detalhado por unidade', agent:'aidlc-architect-agent' },
+  'nfr-requirements': { desc:'Requisitos não-funcionais detalhados', agent:'aidlc-architect-agent' },
   'nfr-design': { desc:'Design para atender requisitos não-funcionais', agent:'aidlc-architect-agent' },
-  'infrastructure-design': { desc:'Design de infraestrutura (IaC)', agent:'aidlc-pipeline-deploy-agent' },
+  'infrastructure-design': { desc:'Design de infraestrutura (IaC)', agent:'aidlc-aws-platform-agent' },
   'code-generation': { desc:'Geração de código da unidade', agent:'aidlc-developer-agent' },
   'build-and-test': { desc:'Build, testes e validação', agent:'aidlc-quality-agent' },
   'ci-pipeline': { desc:'Configura pipeline de integração contínua', agent:'aidlc-pipeline-deploy-agent' },
   'deployment-pipeline': { desc:'Configura pipeline de deployment', agent:'aidlc-pipeline-deploy-agent' },
-  'environment-provisioning': { desc:'Provisiona ambientes (staging/prod)', agent:'aidlc-pipeline-deploy-agent' },
+  'environment-provisioning': { desc:'Provisiona ambientes (staging/prod)', agent:'aidlc-aws-platform-agent' },
   'deployment-execution': { desc:'Executa deploy nos ambientes', agent:'aidlc-pipeline-deploy-agent' },
-  'observability-setup': { desc:'Configura monitoramento e alertas', agent:'aidlc-pipeline-deploy-agent' },
-  'incident-response': { desc:'Define runbooks e plano de incidentes', agent:'aidlc-pipeline-deploy-agent' },
+  'observability-setup': { desc:'Configura monitoramento e alertas', agent:'aidlc-operations-agent' },
+  'incident-response': { desc:'Define runbooks e plano de incidentes', agent:'aidlc-operations-agent' },
   'performance-validation': { desc:'Valida performance em produção', agent:'aidlc-quality-agent' },
-  'feedback-optimization': { desc:'Coleta feedback e otimiza', agent:'aidlc-product-agent' }
+  'feedback-optimization': { desc:'Coleta feedback e otimiza', agent:'aidlc-operations-agent' }
 };
 </script>
 
@@ -612,6 +675,32 @@ async function loadDashboardData(rootHandle) {
   const projectFile = await findFile(rootHandle, `spaces/${data.activeSpace}/memory/project.md`);
   if (projectFile) data.projectMemory = await readFileFromHandle(projectFile);
 
+  // Grid de scopes compilado (opcional): a v2 escreve scopes compostos/custom em
+  // scope-grid.json. Se existir no projeto, a aba Workflow o mescla sobre o grid
+  // hardcoded — assim scopes compostos aparecem sem re-sincronizar o código.
+  // Tenta caminhos comuns por harness (o dashboard aponta pra pasta do projeto).
+  const gridCandidates = [
+    'scope-grid.json',
+    '.claude/tools/data/scope-grid.json',
+    '.kiro/tools/data/scope-grid.json',
+    '.aidlc/tools/data/scope-grid.json',
+    '.codex/tools/data/scope-grid.json',
+    '.cursor/tools/data/scope-grid.json',
+    '.github/aidlc/tools/data/scope-grid.json',
+  ];
+  for (const cand of gridCandidates) {
+    const f = await findFile(rootHandle, cand);
+    if (f) {
+      const parsed = safeJsonParse(await readFileFromHandle(f));
+      if (parsed && typeof parsed === 'object') { data.scopeGrid = parsed; data.scopeGridSource = cand; break; }
+    }
+  }
+  // Preserva o grid do ciclo anterior se este ciclo não achou (arquivo em escrita)
+  if (!data.scopeGrid && dashboardData && dashboardData.scopeGrid) {
+    data.scopeGrid = dashboardData.scopeGrid;
+    data.scopeGridSource = dashboardData.scopeGridSource;
+  }
+
   return data;
 }
 </script>
@@ -697,7 +786,7 @@ function renderLoadScreen() {
     <div class="load-area">
       ${renderLangSelector()}
       <div class="header-logo">🔬</div>
-      <h1>AI-DLC v2 Dashboard</h1>
+      <h1>AI-DLC Dashboard</h1>
       <p class="load-desc">${t('loadDesc')}</p>
       <button class="load-btn" onclick="openFolder()">${t('openBtn')}</button>
       <p style="color:var(--text-muted);font-size:0.75rem;margin-top:8px;">${t('compatNote')}</p>
@@ -754,7 +843,7 @@ function renderDashboard(data) {
     <div class="header">
       <span class="header-logo">🔬</span>
       <div>
-        <h1>AI-DLC v2 Dashboard</h1>
+        <h1>AI-DLC Dashboard</h1>
         <span class="header-subtitle">${esc(intent.slug || 'Workflow')} · ${esc(state.scope || '')} · ${t('clone')}: ${esc(data.cloneId || '—')}</span>
       </div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
@@ -782,6 +871,10 @@ function renderDashboard(data) {
         <div class="stat-value" style="color:var(--green)">${esc(state.depth || '—')}</div>
         <div class="stat-label">${t('stDepth')}</div>
       </div>
+      <div class="stat-box">
+        <div class="stat-value" style="color:var(--blue);font-size:1rem;">${esc(state.testStrategy || '—')}</div>
+        <div class="stat-label">${t('kTestStrategy')}</div>
+      </div>
     </div>
 
     <div class="card">
@@ -805,7 +898,8 @@ function renderDashboard(data) {
     </div>
 
     <div class="tab-bar" role="tablist">
-      <button class="tab-btn active" data-tab="phases" role="tab" aria-selected="true" onclick="switchTab('phases')">${t('tabPhases')}</button>
+      <button class="tab-btn active" data-tab="workflow" role="tab" aria-selected="true" onclick="switchTab('workflow')">${t('tabWorkflow')}</button>
+      <button class="tab-btn" data-tab="phases" role="tab" aria-selected="false" onclick="switchTab('phases')">${t('tabPhases')}</button>
       <button class="tab-btn" data-tab="stages" role="tab" aria-selected="false" onclick="switchTab('stages')">${t('tabStages')}</button>
       <button class="tab-btn" data-tab="sensors" role="tab" aria-selected="false" onclick="switchTab('sensors')" hidden>${t('tabSensors')}</button>
       <button class="tab-btn" data-tab="knowledge" role="tab" aria-selected="false" onclick="switchTab('knowledge')">${t('tabKnowledge')}</button>
@@ -814,7 +908,8 @@ function renderDashboard(data) {
       <button class="tab-btn" data-tab="help" role="tab" aria-selected="false" onclick="switchTab('help')">${t('tabHelp')}</button>
     </div>
 
-    <div id="tab-phases" class="tab-content active" role="tabpanel">${safeRender(renderPhasesTab, state, graph)}</div>
+    <div id="tab-workflow" class="tab-content active" role="tabpanel">${safeRender(renderWorkflowTab, state)}</div>
+    <div id="tab-phases" class="tab-content" role="tabpanel">${safeRender(renderPhasesTab, state, graph)}</div>
     <div id="tab-stages" class="tab-content" role="tabpanel">${safeRender(renderStagesTab, state, graph)}</div>
     <div id="tab-sensors" class="tab-content" role="tabpanel">${safeRender(renderSensorsTab, graph)}</div>
     <div id="tab-knowledge" class="tab-content" role="tabpanel">${safeRender(renderKnowledgeTab, data, state)}</div>
@@ -911,7 +1006,7 @@ function renderSensorsTab(graph) {
     if (!stage.sensor_firings || stage.sensor_firings.length === 0) continue;
     const passed = stage.sensor_firings.filter(s => s.result === 'passed').length;
     const failed = stage.sensor_firings.filter(s => s.result === 'failed').length;
-    html += `<div class="card"><div class="card-header"><h3 style="margin:0">${esc(stage.stage_slug)}</h3><span class="badge badge-green">${passed}✓</span>&nbsp;<span class="badge badge-red">${failed}✗</span></div>`;
+    html += `<div class="card"><div class="card-header"><h3 style="margin:0">${esc(WF_STAGE_LABEL[stage.stage_slug] || stage.stage_slug)}</h3><span class="badge badge-green">${passed}✓</span>&nbsp;<span class="badge badge-red">${failed}✗</span></div>`;
     for (const sensor of stage.sensor_firings) {
       html += `
         <div class="sensor-row ${sensor.result === 'passed' ? 'passed' : 'failed'}">
@@ -972,7 +1067,7 @@ function renderKnowledgeTab(data, state) {
       html += `<div class="card"><h2>${t('kLearnCaptured')}</h2>`;
       for (const s of withLearnings) {
         const total = s.learnings_captured.from_orchestrator + s.learnings_captured.from_user_addition;
-        html += `<div class="knowledge-item"><strong>${esc(s.stage_slug)}:</strong> ${tf('kLearnLine',{total, o:s.learnings_captured.from_orchestrator, u:s.learnings_captured.from_user_addition})}</div>`;
+        html += `<div class="knowledge-item"><strong>${esc(WF_STAGE_LABEL[s.stage_slug] || s.stage_slug)}:</strong> ${tf('kLearnLine',{total, o:s.learnings_captured.from_orchestrator, u:s.learnings_captured.from_user_addition})}</div>`;
       }
       html += '</div>';
     }
@@ -1033,10 +1128,18 @@ function renderHelpTab() {
 
     <div class="card" style="margin-top:12px">
       <h2>${t('hScopes')}</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-top:8px">
-        ${['enterprise','feature','mvp','infra','bugfix','security-patch','poc','refactor','workshop'].map(s =>
-          `<div class="knowledge-item" style="text-align:center"><strong>${s}</strong></div>`
-        ).join('')}
+      <p style="color:var(--text-muted);font-size:0.8rem;margin:4px 0 8px">${t('hScopesNote')}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-top:8px">
+        ${(() => {
+          const grid = typeof buildScopeGrid === 'function' ? buildScopeGrid() : SCOPE_GRID;
+          return Object.keys(grid)
+            .sort((a, b) => scopeExecCount(a, grid) - scopeExecCount(b, grid))
+            .map(s => {
+              const n = scopeExecCount(s, grid);
+              const g = scopeGateCount(s, grid);
+              return `<div class="knowledge-item" style="text-align:center" title="${esc((SCOPE_META[s]||{}).desc || '')}"><strong>${esc(s)}</strong><br><small style="color:var(--text-muted)">${n} ${t('wfStagesRun')} · ${g} ${t('wfGates')}</small></div>`;
+            }).join('');
+        })()}
       </div>
     </div>
 
@@ -1063,8 +1166,10 @@ async function openTokensFolder() {
   try {
     tokenDirHandle = await window.showDirectoryPicker({ mode: 'read' });
     await loadTokenData();
+    lastTokenRefresh = new Date();
     const el = document.getElementById('tab-tokens');
     if (el) el.innerHTML = renderTokensTab();
+    if (typeof startTokenRefresh === 'function') startTokenRefresh();
   } catch (err) {
     if (err.name !== 'AbortError') alert(t('errRead') + err.message);
   }
@@ -1348,9 +1453,11 @@ function renderTokensTab() {
     }
   }
   html += `
-    <div style="display:flex;gap:8px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="refresh-btn" onclick="loadTokenData().then(()=>{document.getElementById('tab-tokens').innerHTML=renderTokensTab();switchTab('tokens')})">${t('tkRefresh')}</button>
+      <button id="token-auto-btn" class="refresh-btn ${typeof tokenAutoRefresh !== 'undefined' && tokenAutoRefresh ? '' : 'paused'}" onclick="toggleTokenAutoRefresh()">${typeof tokenAutoRefresh !== 'undefined' && tokenAutoRefresh ? t('tkAutoOn') : t('tkAutoOff')}</button>
       <button class="refresh-btn" onclick="openTokensFolder()">${t('tkChangeFolder')}</button>
+      <span class="refresh-indicator" style="margin-left:auto">${typeof lastTokenRefresh !== 'undefined' && lastTokenRefresh ? t('updatedAt') + ' ' + lastTokenRefresh.toLocaleTimeString(LOCALES[lang] || 'en-US') : ''}</span>
     </div>`;
   return html;
 }
@@ -1370,14 +1477,14 @@ const PHASE_DETAILS = {
     es: 'Responde "¿qué vamos a construir y por qué?": captura la intención, investiga el mercado, evalúa viabilidad técnica y de negocio, define scope y equipo, y crea mockups iniciales. Se omite en scopes ligeros (workshop, bugfix) donde la intención ya llega lista — por ejemplo, un ticket de Jira detallado.'
   },
   inception: {
-    pt: 'Transforma a intenção em plano executável: faz engenharia reversa do código existente (brownfield), descobre e afirma as práticas do time, analisa requisitos, escreve user stories com critérios BDD, desenha a arquitetura e planeja a entrega em unidades (Bolts). Cada stage tem gate de aprovação.',
-    en: 'Turns intent into an executable plan: reverse-engineers existing code (brownfield), discovers and affirms team practices, analyzes requirements, writes user stories with BDD criteria, designs the architecture and plans delivery in units (Bolts). Every stage has an approval gate.',
-    es: 'Transforma la intención en un plan ejecutable: hace ingeniería inversa del código existente (brownfield), descubre y afirma las prácticas del equipo, analiza requisitos, escribe user stories con criterios BDD, diseña la arquitectura y planifica la entrega en unidades (Bolts). Cada stage tiene gate de aprobación.'
+    pt: 'Transforma a intenção em plano executável: engenharia reversa do código existente (brownfield), descobre e afirma as práticas do time, analisa requisitos, escreve user stories com critérios BDD, faz o design de domínio (Domain Design), gera unidades (Bolts), define contratos entre elas (Contract Design) e planeja a entrega. 9 stages, cada uma com gate de aprovação.',
+    en: 'Turns intent into an executable plan: reverse-engineers existing code (brownfield), discovers and affirms team practices, analyzes requirements, writes user stories with BDD criteria, does domain design, generates units (Bolts), defines contracts between them (Contract Design) and plans delivery. 9 stages, each with an approval gate.',
+    es: 'Transforma la intención en un plan ejecutable: ingeniería inversa del código existente (brownfield), descubre y afirma las prácticas del equipo, analiza requisitos, escribe user stories con criterios BDD, hace el diseño de dominio (Domain Design), genera unidades (Bolts), define contratos entre ellas (Contract Design) y planifica la entrega. 9 stages, cada una con gate de aprobación.'
   },
   construction: {
-    pt: 'Onde o código nasce: para cada unidade (Bolt), faz design funcional, define requisitos não-funcionais, desenha infraestrutura, gera o código, roda build e testes, e configura o pipeline de CI. Pode rodar Bolts em paralelo com um referee coordenando.',
-    en: 'Where the code is born: for each unit (Bolt), does functional design, defines non-functional requirements, designs infrastructure, generates code, runs build and tests, and sets up the CI pipeline. Bolts can run in parallel with a referee coordinating.',
-    es: 'Donde nace el código: para cada unidad (Bolt), hace diseño funcional, define requisitos no funcionales, diseña infraestructura, genera el código, corre build y pruebas, y configura el pipeline de CI. Los Bolts pueden correr en paralelo con un referee coordinando.'
+    pt: 'Onde o código nasce: design funcional, requisitos não-funcionais, design de infra, geração de código, build e testes, e pipeline de CI. O walk padrão é stage-major — cada stage roda para todas as unidades antes da próxima; build/test e CI rodam uma vez ao final. O modo swarm (opt-in) roda unidades em paralelo com um referee coordenando.',
+    en: 'Where the code is born: functional design, non-functional requirements, infrastructure design, code generation, build and tests, and CI pipeline. The default walk is stage-major — each stage runs for every unit before the next; build/test and CI run once at the end. Swarm mode (opt-in) runs units in parallel with a referee coordinating.',
+    es: 'Donde nace el código: diseño funcional, requisitos no funcionales, diseño de infra, generación de código, build y pruebas, y pipeline de CI. El walk por defecto es stage-major — cada stage corre para todas las unidades antes de la siguiente; build/test y CI corren una vez al final. El modo swarm (opt-in) corre unidades en paralelo con un referee coordinando.'
   },
   operation: {
     pt: 'Leva para produção e mantém: pipeline de deployment, provisionamento de ambientes, execução do deploy, observabilidade (monitoramento e alertas), runbooks de incidentes, validação de performance e loop de feedback para otimização.',
@@ -1504,7 +1611,7 @@ function showStageInfo(ev, slug) {
 <script>
 // PART 9: Main app logic & event handlers
 let rootDirHandle = null;
-let activeTab = 'phases';
+let activeTab = 'workflow';
 let selectedIntentDir = null; // dirName do intent selecionado (persiste entre refreshes)
 
 function currentIntent() {
@@ -1528,12 +1635,13 @@ function switchTab(tabId) {
   document.getElementById('tab-' + tabId).classList.add('active');
   const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
   if (btn) { btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
+  // O grafo de workflow desenha as arestas SVG só quando visível (precisa de layout)
+  if (tabId === 'workflow' && typeof drawWfEdges === 'function') requestAnimationFrame(drawWfEdges);
 }
 
 async function refreshData() {
   if (!rootDirHandle) return;
   try {
-    if (tokenDirHandle) await loadTokenData();
     dashboardData = await loadDashboardData(rootDirHandle);
     document.getElementById('app').innerHTML = renderDashboard(dashboardData);
     switchTab(activeTab); // restore active tab after re-render
@@ -1569,6 +1677,48 @@ function toggleAutoRefresh() {
   }
 }
 
+// --- Auto-refresh de tokens/créditos (independente, mais lento) ---
+// Reparsear os .jsonl é caro, então roda num intervalo próprio (não no loop de 5s
+// da pasta aidlc). Só re-renderiza a aba de tokens; funciona mesmo sem a pasta aidlc.
+let tokenAutoRefresh = true;
+let tokenRefreshTimer = null;
+let lastTokenRefresh = null;
+const TOKEN_REFRESH_INTERVAL_MS = 30000;
+
+async function refreshTokens() {
+  if (!tokenDirHandle) return;
+  try {
+    await loadTokenData();
+    lastTokenRefresh = new Date();
+    // Só re-renderiza se a aba de tokens estiver visível (evita trabalho invisível)
+    if (activeTab === 'tokens') {
+      const el = document.getElementById('tab-tokens');
+      if (el) el.innerHTML = safeRender(renderTokensTab);
+    }
+  } catch (err) {
+    console.warn('Falha ao atualizar tokens:', err);
+  }
+}
+
+function startTokenRefresh() {
+  stopTokenRefresh();
+  if (tokenAutoRefresh) tokenRefreshTimer = setInterval(refreshTokens, TOKEN_REFRESH_INTERVAL_MS);
+}
+
+function stopTokenRefresh() {
+  if (tokenRefreshTimer) { clearInterval(tokenRefreshTimer); tokenRefreshTimer = null; }
+}
+
+function toggleTokenAutoRefresh() {
+  tokenAutoRefresh = !tokenAutoRefresh;
+  if (tokenAutoRefresh && tokenDirHandle) startTokenRefresh(); else stopTokenRefresh();
+  const btn = document.getElementById('token-auto-btn');
+  if (btn) {
+    btn.textContent = tokenAutoRefresh ? t('tkAutoOn') : t('tkAutoOff');
+    btn.classList.toggle('paused', !tokenAutoRefresh);
+  }
+}
+
 async function openFolder() {
   try {
     rootDirHandle = await window.showDirectoryPicker({ mode: 'read' });
@@ -1586,8 +1736,11 @@ async function openFolder() {
 
 // Pausa o polling quando a aba do navegador está em background
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { stopAutoRefresh(); }
-  else if (autoRefreshEnabled && rootDirHandle) { refreshData(); startAutoRefresh(); }
+  if (document.hidden) { stopAutoRefresh(); stopTokenRefresh(); }
+  else {
+    if (autoRefreshEnabled && rootDirHandle) { refreshData(); startAutoRefresh(); }
+    if (tokenAutoRefresh && tokenDirHandle) { refreshTokens(); startTokenRefresh(); }
+  }
 });
 
 // Render inicial adiado para depois de todos os scripts (dicionários I18N incluídos)
@@ -1615,12 +1768,21 @@ Object.assign(I18N.pt = I18N.pt || {}, {
   loading:'Carregando dados...', errTitle:'Erro', errRead:'Erro ao ler pasta: ',
   noWf:'Nenhum workflow encontrado', noWfDesc:'A pasta aidlc não contém intents ativos.', intentsNotFound:'intents.json não encontrado',
   naTitle:'Projeto sem AI-DLC',
-  naDesc:'A estrutura <code>aidlc/spaces/…/intents</code> não foi encontrada. Aparentemente este projeto ainda não rodou um workflow AI-DLC v2 — rode <code>/aidlc &lt;descrição&gt;</code> para iniciar um, ou selecione outra pasta.',
+  naDesc:'A estrutura <code>aidlc/spaces/…/intents</code> não foi encontrada. Aparentemente este projeto ainda não rodou um workflow AI-DLC — rode <code>/aidlc &lt;descrição&gt;</code> para iniciar um, ou selecione outra pasta.',
   clone:'Clone', stStagesDone:'Stages Concluídos', stCurrentStage:'Stage Atual', stActiveAgent:'Agente Ativo', stDepth:'Profundidade',
   overallProgress:'Progresso Geral', lblStart:'Início', lblUpdated:'Atualizado', updatedAt:'Atualizado às',
   btnPause:'⏸ Pausar', btnResume:'▶ Retomar', btnRefresh:'🔄 Atualizar',
   updWarn:'⚠️ Falha ao atualizar — tentando de novo em 5s',
   tabPhases:'Fases', tabStages:'Stages', tabSensors:'Sensores', tabKnowledge:'Conhecimento', tabAudit:'Auditoria', tabTokens:'Tokens', tabHelp:'Ajuda',
+  tabWorkflow:'Workflow',
+  wfTitle:'🗺️ Formato do workflow por scope',
+  wfSub:'Mostra quais das 33 stages rodam de acordo com o scope. As esmaecidas são puladas (o doctor ainda as valida, só não executam).',
+  wfRealScope:'Scope real deste workflow', wfIsReal:'Este é o scope em execução:', wfNotReal:'Prévia — o scope real é "{real}".',
+  wfOf:'de', wfStagesRun:'stages rodam',
+  wfGates:'gates', wfComposed:'composto', wfGridSrc:'Grid de scopes: {src}',
+  wfComposedDesc:'Scope composto/custom — grade derivada do estado do workflow',
+  wfVGate:'Verification Gate {n}', wfVGateTip:'Gate de verificação de fronteira de fase', wfVGateLeg:'gate de verificação entre fases',
+  wfLegExec:'EXECUTE neste scope', wfLegSkip:'SKIP, fora do scope', wfLegDone:'concluída (estado real)', wfLegCurrent:'stage atual (estado real)',
   badgeRunning:'Em Execução', badgeCompleted:'Concluído', badgePaused:'Pausado', badgeFailed:'Falhou', badgeUnknown:'Desconhecido',
   phDone:'Concluída', phActive:'Ativa', phPending:'Pendente', phSkipped:'Pulada',
   stDone:'Concluído', stActive:'Em andamento', stAwaiting:'Aguardando aprovação', stRevising:'Em revisão', stSkipped:'Pulado', stPending:'Não iniciado',
@@ -1651,6 +1813,7 @@ Object.assign(I18N.pt = I18N.pt || {}, {
   tkClaudeCard:'Claude Code — Tokens', tkKiroCard:'Kiro — Sessões',
   tkKiroNote:'O Kiro não grava tokens, mas grava créditos consumidos por turno. Abaixo: sessões com pico de contexto e créditos.',
   tkByModel:'Por Modelo', tkBySession:'Por Sessão', tkMsgs:'mensagens', tkRecords:'registros', tkContext:'contexto', tkRefresh:'🔄 Atualizar tokens',
+  tkAutoOn:'⏸ Auto (30s)', tkAutoOff:'▶ Auto off',
   tabError:'Erro ao renderizar esta aba',
   tkCostCard:'Custo por Stage (estimado)',
   tkCostNote:'Estimativa local: cruza os timestamps dos transcripts com o intervalo de execução de cada stage. Preços de referência por 1M tokens (tabela PRICING no código) — ajuste conforme seu contrato/região.',
@@ -1664,17 +1827,17 @@ Object.assign(I18N.pt = I18N.pt || {}, {
 <script>
 // PART 10b: I18N - Português (Ajuda)
 Object.assign(I18N.pt = I18N.pt || {}, {
-  hTitle:'O que é o AI-DLC v2?',
-  hIntro:'O AI-DLC (AI-Driven Development Life Cycle) é uma metodologia estruturada para desenvolvimento de software com IA. Ele organiza o trabalho em <strong>5 fases</strong>, <strong>32 stages</strong>, com <strong>14 agentes especializados</strong> e gates de aprovação em cada etapa.',
+  hTitle:'O que é o AI-DLC?',
+  hIntro:'O AI-DLC (AI-Driven Development Life Cycle) é uma metodologia estruturada para desenvolvimento de software com IA. Ele organiza o trabalho em <strong>5 fases</strong>, <strong>33 stages</strong>, com <strong>14 agentes especializados</strong> e gates de aprovação em cada etapa.',
   hC1t:'🏗️ Inicialização (Initialization)', hC1:'Configura o workspace, detecta stack tecnológica e inicializa o estado do workflow. Automática e rápida.',
   hC2t:'💡 Ideação (Ideation)', hC2:'Captura intenção, pesquisa mercado, avalia viabilidade e define escopo. Pulada em escopos workshop/bugfix.',
-  hC3t:'📐 Concepção (Inception)', hC3:'Engenharia reversa do código, descoberta de práticas, análise de requisitos, user stories, design de arquitetura e planejamento de entrega.',
-  hC4t:'🔨 Construção (Construction)', hC4:'Design funcional, requisitos não-funcionais, geração de código, build/test e pipeline CI. Executada por unidade (Bolt).',
+  hC3t:'📐 Concepção (Inception)', hC3:'Engenharia reversa, descoberta de práticas, análise de requisitos, user stories, mockups refinados, <strong>Domain Design</strong>, geração de unidades, <strong>Contract Design</strong> e planejamento de entrega. 9 stages.',
+  hC4t:'🔨 Construção (Construction)', hC4:'Design funcional, NFRs, design de infra, geração de código, build/test e pipeline CI. Caminho padrão é <em>stage-major</em>: cada stage roda por unidade; build/test e CI rodam uma vez ao final.',
   hC5t:'🚀 Operação (Operation)', hC5:'Deploy, provisionamento, observabilidade, resposta a incidentes e validação de performance em produção.',
-  hC6t:'🤖 Agentes', hC6:'14 agentes: developer, architect, product, quality, design, pipeline-deploy, security, data, e mais. Cada stage tem um agente responsável.',
+  hC6t:'🤖 Agentes', hC6:'14 agentes: 11 de domínio (developer, architect, product, delivery, design, quality, aws-platform, operations, devsecops, compliance, pipeline-deploy), 2 revisores e o compositor adaptativo.',
   hC7t:'📡 Sensores', hC7:'Validam automaticamente seções obrigatórias e cobertura upstream. Podem passar ou falhar — o agente corrige antes de seguir.',
-  hC8t:'💡 Aprendizados', hC8:'O framework captura decisões e correções como regras persistentes (NEVER/ALWAYS). Evita repetir os mesmos erros.',
-  hScopes:'Escopos Disponíveis', hCommands:'Comandos Úteis',
+  hC8t:'🗺️ Aba Workflow', hC8:'A aba <strong>Workflow</strong> mostra quais das 33 stages rodam para o scope em execução (EXECUTE destacadas, SKIP esmaecidas), com as stages já concluídas marcadas do estado real.',
+  hScopes:'Escopos Disponíveis', hScopesNote:'Contagem de stages (EXECUTE) e gates de aprovação por scope. Scopes compostos aparecem aqui quando existe um scope-grid.json no projeto.', hCommands:'Comandos Úteis',
   hCmd1:'Verifica saúde do setup', hCmd2:'Inicia um workflow', hCmd3:'Mostra status atual', hCmd4:'Pula para um stage', hCmd5:'Compõe plano adaptativo'
 });
 </script>
@@ -1688,12 +1851,21 @@ Object.assign(I18N.en = I18N.en || {}, {
   loading:'Loading data...', errTitle:'Error', errRead:'Error reading folder: ',
   noWf:'No workflow found', noWfDesc:'The aidlc folder has no active intents.', intentsNotFound:'intents.json not found',
   naTitle:'Not an AI-DLC project',
-  naDesc:'The <code>aidlc/spaces/…/intents</code> structure was not found. This project apparently has not run an AI-DLC v2 workflow yet — run <code>/aidlc &lt;description&gt;</code> to start one, or select a different folder.',
+  naDesc:'The <code>aidlc/spaces/…/intents</code> structure was not found. This project apparently has not run an AI-DLC workflow yet — run <code>/aidlc &lt;description&gt;</code> to start one, or select a different folder.',
   clone:'Clone', stStagesDone:'Stages Completed', stCurrentStage:'Current Stage', stActiveAgent:'Active Agent', stDepth:'Depth',
   overallProgress:'Overall Progress', lblStart:'Started', lblUpdated:'Updated', updatedAt:'Updated at',
   btnPause:'⏸ Pause', btnResume:'▶ Resume', btnRefresh:'🔄 Refresh',
   updWarn:'⚠️ Refresh failed — retrying in 5s',
   tabPhases:'Phases', tabStages:'Stages', tabSensors:'Sensors', tabKnowledge:'Knowledge', tabAudit:'Audit', tabTokens:'Tokens', tabHelp:'Help',
+  tabWorkflow:'Workflow',
+  wfTitle:'🗺️ Workflow shape per scope',
+  wfSub:'Shows which of the 33 stages run for each scope. Dimmed ones are skipped (the doctor still validates them, they just do not execute).',
+  wfRealScope:'This workflow\'s actual scope', wfIsReal:'This is the running scope:', wfNotReal:'Preview — the actual scope is "{real}".',
+  wfOf:'of', wfStagesRun:'stages run',
+  wfGates:'gates', wfComposed:'composed', wfGridSrc:'Scope grid: {src}',
+  wfComposedDesc:'Composed/custom scope — grid derived from the workflow state',
+  wfVGate:'Verification Gate {n}', wfVGateTip:'Phase-boundary verification gate', wfVGateLeg:'phase verification gate',
+  wfLegExec:'EXECUTE in this scope', wfLegSkip:'SKIP, out of scope', wfLegDone:'done (live state)', wfLegCurrent:'current stage (live state)',
   badgeRunning:'Running', badgeCompleted:'Completed', badgePaused:'Paused', badgeFailed:'Failed', badgeUnknown:'Unknown',
   phDone:'Completed', phActive:'Active', phPending:'Pending', phSkipped:'Skipped',
   stDone:'Completed', stActive:'In progress', stAwaiting:'Awaiting approval', stRevising:'Revising', stSkipped:'Skipped', stPending:'Not started',
@@ -1724,6 +1896,7 @@ Object.assign(I18N.en = I18N.en || {}, {
   tkClaudeCard:'Claude Code — Tokens', tkKiroCard:'Kiro — Sessions',
   tkKiroNote:'Kiro does not store tokens, but it stores credits consumed per turn. Below: sessions with peak context usage and credits.',
   tkByModel:'By Model', tkBySession:'By Session', tkMsgs:'messages', tkRecords:'records', tkContext:'context', tkRefresh:'🔄 Refresh tokens',
+  tkAutoOn:'⏸ Auto (30s)', tkAutoOff:'▶ Auto off',
   tabError:'Failed to render this tab',
   tkCostCard:'Cost per Stage (estimated)',
   tkCostNote:'Local estimate: cross-references transcript timestamps with each stage\'s execution window. Reference prices per 1M tokens (PRICING table in the code) — adjust to your contract/region.',
@@ -1737,17 +1910,17 @@ Object.assign(I18N.en = I18N.en || {}, {
 <script>
 // PART 11b: I18N - English (Help)
 Object.assign(I18N.en = I18N.en || {}, {
-  hTitle:'What is AI-DLC v2?',
-  hIntro:'AI-DLC (AI-Driven Development Life Cycle) is a structured methodology for AI-driven software development. It organizes work into <strong>5 phases</strong>, <strong>32 stages</strong>, with <strong>14 specialized agents</strong> and approval gates at every step.',
+  hTitle:'What is AI-DLC?',
+  hIntro:'AI-DLC (AI-Driven Development Life Cycle) is a structured methodology for AI-driven software development. It organizes work into <strong>5 phases</strong>, <strong>33 stages</strong>, with <strong>14 specialized agents</strong> and approval gates at every step.',
   hC1t:'🏗️ Initialization', hC1:'Sets up the workspace, detects the tech stack and initializes workflow state. Automatic and fast.',
   hC2t:'💡 Ideation', hC2:'Captures intent, researches the market, assesses feasibility and defines scope. Skipped in workshop/bugfix scopes.',
-  hC3t:'📐 Inception', hC3:'Reverse-engineers the code, discovers team practices, analyzes requirements, writes user stories, designs architecture and plans delivery.',
-  hC4t:'🔨 Construction', hC4:'Functional design, non-functional requirements, code generation, build/test and CI pipeline. Runs per unit (Bolt).',
+  hC3t:'📐 Inception', hC3:'Reverse engineering, practices discovery, requirements analysis, user stories, refined mockups, <strong>Domain Design</strong>, units generation, <strong>Contract Design</strong> and delivery planning. 9 stages.',
+  hC4t:'🔨 Construction', hC4:'Functional design, NFRs, infrastructure design, code generation, build/test and CI pipeline. Default walk is <em>stage-major</em>: each stage runs per unit; build/test and CI run once at the end.',
   hC5t:'🚀 Operation', hC5:'Deployment, provisioning, observability, incident response and performance validation in production.',
-  hC6t:'🤖 Agents', hC6:'14 agents: developer, architect, product, quality, design, pipeline-deploy, security, data, and more. Each stage has a responsible agent.',
+  hC6t:'🤖 Agents', hC6:'14 agents: 11 domain (developer, architect, product, delivery, design, quality, aws-platform, operations, devsecops, compliance, pipeline-deploy), 2 reviewers and the adaptive composer.',
   hC7t:'📡 Sensors', hC7:'Automatically validate required sections and upstream coverage. They can pass or fail — the agent fixes issues before moving on.',
-  hC8t:'💡 Learnings', hC8:'The framework captures decisions and corrections as persistent rules (NEVER/ALWAYS). Avoids repeating the same mistakes.',
-  hScopes:'Available Scopes', hCommands:'Useful Commands',
+  hC8t:'🗺️ Workflow tab', hC8:'The <strong>Workflow</strong> tab shows which of the 33 stages run for the active scope (EXECUTE highlighted, SKIP dimmed), with completed stages marked from live state.',
+  hScopes:'Available Scopes', hScopesNote:'Stage (EXECUTE) and approval-gate counts per scope. Composed scopes appear here when the project has a scope-grid.json.', hCommands:'Useful Commands',
   hCmd1:'Checks setup health', hCmd2:'Starts a workflow', hCmd3:'Shows current status', hCmd4:'Jumps to a stage', hCmd5:'Composes an adaptive plan'
 });
 </script>
@@ -1761,12 +1934,21 @@ Object.assign(I18N.es = I18N.es || {}, {
   loading:'Cargando datos...', errTitle:'Error', errRead:'Error al leer la carpeta: ',
   noWf:'Ningún workflow encontrado', noWfDesc:'La carpeta aidlc no contiene intents activos.', intentsNotFound:'intents.json no encontrado',
   naTitle:'Proyecto sin AI-DLC',
-  naDesc:'La estructura <code>aidlc/spaces/…/intents</code> no fue encontrada. Aparentemente este proyecto aún no ejecutó un workflow AI-DLC v2 — ejecuta <code>/aidlc &lt;descripción&gt;</code> para iniciar uno, o selecciona otra carpeta.',
+  naDesc:'La estructura <code>aidlc/spaces/…/intents</code> no fue encontrada. Aparentemente este proyecto aún no ejecutó un workflow AI-DLC — ejecuta <code>/aidlc &lt;descripción&gt;</code> para iniciar uno, o selecciona otra carpeta.',
   clone:'Clone', stStagesDone:'Stages Completados', stCurrentStage:'Stage Actual', stActiveAgent:'Agente Activo', stDepth:'Profundidad',
   overallProgress:'Progreso General', lblStart:'Inicio', lblUpdated:'Actualizado', updatedAt:'Actualizado a las',
   btnPause:'⏸ Pausar', btnResume:'▶ Reanudar', btnRefresh:'🔄 Actualizar',
   updWarn:'⚠️ Error al actualizar — reintentando en 5s',
   tabPhases:'Fases', tabStages:'Stages', tabSensors:'Sensores', tabKnowledge:'Conocimiento', tabAudit:'Auditoría', tabTokens:'Tokens', tabHelp:'Ayuda',
+  tabWorkflow:'Workflow',
+  wfTitle:'🗺️ Formato del workflow por scope',
+  wfSub:'Muestra cuáles de las 33 stages corren según el scope. Las atenuadas se omiten (el doctor aún las valida, solo no se ejecutan).',
+  wfRealScope:'Scope real de este workflow', wfIsReal:'Este es el scope en ejecución:', wfNotReal:'Vista previa — el scope real es "{real}".',
+  wfOf:'de', wfStagesRun:'stages corren',
+  wfGates:'gates', wfComposed:'compuesto', wfGridSrc:'Grid de scopes: {src}',
+  wfComposedDesc:'Scope compuesto/custom — grid derivado del estado del workflow',
+  wfVGate:'Verification Gate {n}', wfVGateTip:'Gate de verificación de frontera de fase', wfVGateLeg:'gate de verificación entre fases',
+  wfLegExec:'EXECUTE en este scope', wfLegSkip:'SKIP, fuera del scope', wfLegDone:'completada (estado real)', wfLegCurrent:'stage actual (estado real)',
   badgeRunning:'En Ejecución', badgeCompleted:'Completado', badgePaused:'Pausado', badgeFailed:'Falló', badgeUnknown:'Desconocido',
   phDone:'Completada', phActive:'Activa', phPending:'Pendiente', phSkipped:'Omitida',
   stDone:'Completado', stActive:'En curso', stAwaiting:'Esperando aprobación', stRevising:'En revisión', stSkipped:'Omitido', stPending:'No iniciado',
@@ -1797,6 +1979,7 @@ Object.assign(I18N.es = I18N.es || {}, {
   tkClaudeCard:'Claude Code — Tokens', tkKiroCard:'Kiro — Sesiones',
   tkKiroNote:'Kiro no guarda tokens, pero guarda créditos consumidos por turno. Abajo: sesiones con pico de contexto y créditos.',
   tkByModel:'Por Modelo', tkBySession:'Por Sesión', tkMsgs:'mensajes', tkRecords:'registros', tkContext:'contexto', tkRefresh:'🔄 Actualizar tokens',
+  tkAutoOn:'⏸ Auto (30s)', tkAutoOff:'▶ Auto off',
   tabError:'Error al renderizar esta pestaña',
   tkCostCard:'Costo por Stage (estimado)',
   tkCostNote:'Estimación local: cruza los timestamps de los transcripts con la ventana de ejecución de cada stage. Precios de referencia por 1M tokens (tabla PRICING en el código) — ajusta según tu contrato/región.',
@@ -1810,17 +1993,17 @@ Object.assign(I18N.es = I18N.es || {}, {
 <script>
 // PART 12b: I18N - Español (Ayuda)
 Object.assign(I18N.es = I18N.es || {}, {
-  hTitle:'¿Qué es AI-DLC v2?',
-  hIntro:'AI-DLC (AI-Driven Development Life Cycle) es una metodología estructurada para el desarrollo de software con IA. Organiza el trabajo en <strong>5 fases</strong>, <strong>32 stages</strong>, con <strong>14 agentes especializados</strong> y gates de aprobación en cada etapa.',
+  hTitle:'¿Qué es AI-DLC?',
+  hIntro:'AI-DLC (AI-Driven Development Life Cycle) es una metodología estructurada para el desarrollo de software con IA. Organiza el trabajo en <strong>5 fases</strong>, <strong>33 stages</strong>, con <strong>14 agentes especializados</strong> y gates de aprobación en cada etapa.',
   hC1t:'🏗️ Inicialización (Initialization)', hC1:'Configura el workspace, detecta el stack tecnológico e inicializa el estado del workflow. Automática y rápida.',
   hC2t:'💡 Ideación (Ideation)', hC2:'Captura la intención, investiga el mercado, evalúa viabilidad y define el scope. Se omite en scopes workshop/bugfix.',
-  hC3t:'📐 Concepción (Inception)', hC3:'Ingeniería inversa del código, descubrimiento de prácticas, análisis de requisitos, user stories, diseño de arquitectura y planificación de entrega.',
-  hC4t:'🔨 Construcción (Construction)', hC4:'Diseño funcional, requisitos no funcionales, generación de código, build/test y pipeline de CI. Se ejecuta por unidad (Bolt).',
+  hC3t:'📐 Concepción (Inception)', hC3:'Ingeniería inversa, descubrimiento de prácticas, análisis de requisitos, user stories, mockups refinados, <strong>Domain Design</strong>, generación de unidades, <strong>Contract Design</strong> y planificación de entrega. 9 stages.',
+  hC4t:'🔨 Construcción (Construction)', hC4:'Diseño funcional, NFRs, diseño de infra, generación de código, build/test y pipeline de CI. El camino por defecto es <em>stage-major</em>: cada stage corre por unidad; build/test y CI corren una vez al final.',
   hC5t:'🚀 Operación (Operation)', hC5:'Deploy, aprovisionamiento, observabilidad, respuesta a incidentes y validación de performance en producción.',
-  hC6t:'🤖 Agentes', hC6:'14 agentes: developer, architect, product, quality, design, pipeline-deploy, security, data y más. Cada stage tiene un agente responsable.',
+  hC6t:'🤖 Agentes', hC6:'14 agentes: 11 de dominio (developer, architect, product, delivery, design, quality, aws-platform, operations, devsecops, compliance, pipeline-deploy), 2 revisores y el compositor adaptativo.',
   hC7t:'📡 Sensores', hC7:'Validan automáticamente secciones obligatorias y cobertura upstream. Pueden pasar o fallar — el agente corrige antes de seguir.',
-  hC8t:'💡 Aprendizajes', hC8:'El framework captura decisiones y correcciones como reglas persistentes (NEVER/ALWAYS). Evita repetir los mismos errores.',
-  hScopes:'Scopes Disponibles', hCommands:'Comandos Útiles',
+  hC8t:'🗺️ Pestaña Workflow', hC8:'La pestaña <strong>Workflow</strong> muestra cuáles de las 33 stages corren para el scope activo (EXECUTE resaltadas, SKIP atenuadas), con las stages completadas marcadas desde el estado real.',
+  hScopes:'Scopes Disponibles', hScopesNote:'Conteo de stages (EXECUTE) y gates de aprobación por scope. Los scopes compuestos aparecen aquí cuando el proyecto tiene un scope-grid.json.', hCommands:'Comandos Útiles',
   hCmd1:'Verifica la salud del setup', hCmd2:'Inicia un workflow', hCmd3:'Muestra el estado actual', hCmd4:'Salta a un stage', hCmd5:'Compone un plan adaptativo'
 });
 </script>
@@ -1843,8 +2026,9 @@ const STAGE_DESC_EN = {
   'requirements-analysis':'Analyzes functional and non-functional requirements',
   'user-stories':'Writes user stories with BDD acceptance criteria',
   'refined-mockups':'Refines mockups based on requirements',
-  'application-design':'Application architecture design and ADRs',
+  'domain-design':'Domain design, components and ADRs',
   'units-generation':'Generates work units (Bolts) for construction',
+  'contract-design':'Defines contracts/interfaces between units',
   'delivery-planning':'Plans the Bolt delivery sequence',
   'functional-design':'Detailed functional design per unit',
   'nfr-requirements':'Detailed non-functional requirements',
@@ -1881,8 +2065,9 @@ const STAGE_DESC_ES = {
   'requirements-analysis':'Analiza requisitos funcionales y no funcionales',
   'user-stories':'Escribe user stories con criterios de aceptación BDD',
   'refined-mockups':'Refina mockups según los requisitos',
-  'application-design':'Diseño de arquitectura de la aplicación y ADRs',
+  'domain-design':'Diseño de dominio, componentes y ADRs',
   'units-generation':'Genera unidades de trabajo (Bolts) para construcción',
+  'contract-design':'Define contratos/interfaces entre unidades',
   'delivery-planning':'Planifica la secuencia de entrega de los Bolts',
   'functional-design':'Diseño funcional detallado por unidad',
   'nfr-requirements':'Requisitos no funcionales detallados',
@@ -1899,6 +2084,307 @@ const STAGE_DESC_ES = {
   'performance-validation':'Valida performance en producción',
   'feedback-optimization':'Recoge feedback y optimiza'
 };
+</script>
+
+<script>
+// PART 21: Workflow-shape graph — mostra o formato do workflow do scope
+// que está rodando (não fixo). Fonte: matriz stage-by-scope do AI-DLC 2.0 GA
+// (docs/guide/05-scopes-and-depth.md). 5 colunas × 33 stages.
+//
+// O grafo default reflete o scope do intent selecionado (state.scope) e marca
+// como concluídas as stages com checkbox [x] no aidlc-state.md. Chips permitem
+// explorar "e se fosse outro scope" sem alterar o estado real.
+
+// Colunas canônicas — reutiliza PHASES (fonte única) para os slugs, e um mapa
+// de rótulos curtos legíveis para os cards do grafo.
+const WF_STAGE_LABEL = {
+  'workspace-scaffold':'Workspace Scaffold', 'workspace-detection':'Workspace Detection', 'state-init':'State Init',
+  'intent-capture':'Intent Capture', 'market-research':'Market Research', 'feasibility':'Feasibility',
+  'scope-definition':'Scope Definition', 'team-formation':'Team Formation', 'rough-mockups':'Rough Mockups',
+  'approval-handoff':'Approval & Handoff',
+  'reverse-engineering':'Reverse Engineering', 'practices-discovery':'Practices Discovery',
+  'requirements-analysis':'Requirements Analysis', 'user-stories':'User Stories', 'refined-mockups':'Refined Mockups',
+  'domain-design':'Domain Design', 'units-generation':'Units Generation', 'contract-design':'Contract Design',
+  'delivery-planning':'Delivery Planning',
+  'functional-design':'Functional Design', 'nfr-requirements':'NFR Requirements', 'nfr-design':'NFR Design',
+  'infrastructure-design':'Infrastructure Design', 'code-generation':'Code Generation',
+  'build-and-test':'Build and Test', 'ci-pipeline':'CI Pipeline',
+  'deployment-pipeline':'Deployment Pipeline', 'environment-provisioning':'Env Provisioning',
+  'deployment-execution':'Deployment Exec', 'observability-setup':'Observability Setup',
+  'incident-response':'Incident Response', 'performance-validation':'Performance Validation',
+  'feedback-optimization':'Feedback & Optim'
+};
+const WF_COL_TITLE = { initialization:'0 · Init', ideation:'1 · Ideation', inception:'2 · Inception', construction:'3 · Construction', operation:'4 · Operation' };
+
+function wfCols() {
+  return PHASES.map(p => ({ key: p.id, title: WF_COL_TITLE[p.id] || p.id, stages: p.stages }));
+}
+
+// Descrição one-line de cada scope (o que ele roda). N EXECUTE derivado do grid.
+const SCOPE_META = {
+  enterprise:      { desc:'Rigor máximo: toda stage, todo gate, trilha de auditoria completa' },
+  feature:         { desc:'O padrão full-lifecycle: todas as 33 stages', tag:'(everything)' },
+  mvp:             { desc:'Entrega o core greenfield: pula a fase de operação' },
+  poc:             { desc:'Prova uma ideia rápido: intent, depois direto pra código e teste' },
+  bugfix:          { desc:'Corrige e faz deploy de um defeito específico' },
+  refactor:        { desc:'Reestrutura código existente sem mudar comportamento' },
+  infra:           { desc:'Mudança de infra: arquitetura, IaC, provisioning e observability' },
+  'security-patch':{ desc:'Resposta a CVE: caminho rápido pelas stages de segurança' },
+  classic:         { desc:'Lifecycle estilo v1, sem a cerimônia de Ideation' },
+  workshop:        { desc:'Sessão facilitada/treinamento com o lifecycle completo pós-Ideation' },
+  express:         { desc:'O caminho mais leve: requisitos → código → deploy condicional, sem design' }
+};
+
+// Matriz stage-by-scope oficial (✓ = EXECUTE). Ausente = SKIP.
+// Base: docs/guide/05-scopes-and-depth.md (AI-DLC 2.0 GA, 33 stages).
+const SCOPE_EXEC = {
+  enterprise: 'ALL',
+  feature: 'ALL',
+  mvp: ['workspace-scaffold','workspace-detection','state-init','intent-capture','feasibility','scope-definition','rough-mockups','reverse-engineering','practices-discovery','requirements-analysis','user-stories','refined-mockups','domain-design','units-generation','contract-design','delivery-planning','functional-design','nfr-requirements','nfr-design','infrastructure-design','code-generation','build-and-test','ci-pipeline'],
+  poc: ['workspace-scaffold','workspace-detection','state-init','intent-capture','reverse-engineering','requirements-analysis','code-generation','build-and-test'],
+  bugfix: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','requirements-analysis','code-generation','build-and-test','deployment-pipeline','deployment-execution'],
+  refactor: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','requirements-analysis','functional-design','code-generation','build-and-test','deployment-pipeline','deployment-execution'],
+  infra: ['workspace-scaffold','workspace-detection','state-init','practices-discovery','requirements-analysis','nfr-requirements','nfr-design','infrastructure-design','ci-pipeline','deployment-pipeline','environment-provisioning','deployment-execution','observability-setup'],
+  'security-patch': ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','requirements-analysis','nfr-requirements','code-generation','build-and-test','deployment-pipeline','deployment-execution'],
+  classic: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','practices-discovery','requirements-analysis','user-stories','refined-mockups','domain-design','units-generation','contract-design','delivery-planning','functional-design','nfr-requirements','nfr-design','infrastructure-design','code-generation','build-and-test','ci-pipeline','deployment-pipeline','environment-provisioning','deployment-execution','observability-setup','incident-response','performance-validation','feedback-optimization'],
+  workshop: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','practices-discovery','requirements-analysis','user-stories','refined-mockups','domain-design','units-generation','contract-design','delivery-planning','functional-design','nfr-requirements','nfr-design','infrastructure-design','code-generation','build-and-test','ci-pipeline','deployment-pipeline','environment-provisioning','deployment-execution','observability-setup','incident-response','performance-validation','feedback-optimization'],
+  express: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','requirements-analysis','code-generation','build-and-test','deployment-pipeline','deployment-execution','observability-setup']
+};
+
+// Constrói o grid base { scope: { slug: 'EXECUTE'|'SKIP' } } a partir de SCOPE_EXEC.
+const SCOPE_GRID_BASE = (() => {
+  const allSlugs = PHASES.flatMap(p => p.stages);
+  const grid = {};
+  for (const [scope, spec] of Object.entries(SCOPE_EXEC)) {
+    const exec = spec === 'ALL' ? new Set(allSlugs) : new Set(spec);
+    grid[scope] = {};
+    for (const slug of allSlugs) grid[scope][slug] = exec.has(slug) ? 'EXECUTE' : 'SKIP';
+  }
+  return grid;
+})();
+
+// Grid efetivo: base hardcoded + scopes compostos/custom lidos de scope-grid.json.
+// A v2 escreve scopes compostos nesse arquivo; mesclá-lo deixa a aba fiel sem
+// re-sincronizar o código a cada release. Normaliza o shape ({scope:{slug:...}}
+// ou {scopes:{...}}) e só aceita valores EXECUTE/SKIP para as 33 stages conhecidas.
+function buildScopeGrid() {
+  const allSlugs = PHASES.flatMap(p => p.stages);
+  const grid = {};
+  for (const [s, g] of Object.entries(SCOPE_GRID_BASE)) grid[s] = { ...g };
+  const ext = (typeof dashboardData !== 'undefined' && dashboardData && dashboardData.scopeGrid) || null;
+  if (ext) {
+    const table = ext.scopes && typeof ext.scopes === 'object' ? ext.scopes : ext;
+    for (const [scope, membership] of Object.entries(table)) {
+      if (!membership || typeof membership !== 'object') continue;
+      const row = {};
+      for (const slug of allSlugs) {
+        const v = membership[slug];
+        row[slug] = (v === 'EXECUTE' || v === true) ? 'EXECUTE' : 'SKIP';
+      }
+      grid[scope] = row; // externo tem prioridade (inclui scopes que não existem no base)
+    }
+  }
+  // Scope composto/custom (/aidlc compose) sem entrada no grid: sintetiza a grade a
+  // partir do estado do intent atual (state.stages traz action EXECUTE/SKIP por stage).
+  // Assim o compose funciona mesmo sem scope-grid.json, e o clique nos chips o mantém.
+  try {
+    const intent = typeof currentIntent === 'function' ? currentIntent() : null;
+    const st = intent && intent.state ? parseState(intent.state) : null;
+    const rs = (st?.scope || '').trim().toLowerCase();
+    if (rs && !grid[rs] && st?.stages && Object.keys(st.stages).length) {
+      const row = {}; let known = 0;
+      for (const slug of allSlugs) {
+        const act = st.stages[slug]?.action;
+        if (act) known++;
+        row[slug] = act === 'EXECUTE' ? 'EXECUTE' : 'SKIP';
+      }
+      if (known >= 3) {
+        grid[rs] = row;
+        if (!SCOPE_META[rs]) SCOPE_META[rs] = { desc: t('wfComposedDesc') };
+      }
+    }
+  } catch {}
+  return grid;
+}
+
+// Compat: SCOPE_GRID continua existindo como o grid base (usado pelos testes e como
+// fallback). O render usa buildScopeGrid() para incluir os scopes externos.
+const SCOPE_GRID = SCOPE_GRID_BASE;
+
+function scopeExecCount(scope, grid) {
+  const g = (grid || SCOPE_GRID_BASE)[scope];
+  if (!g) return 0;
+  return Object.values(g).filter(v => v === 'EXECUTE').length;
+}
+
+// Gates de aprovação ≈ stages EXECUTE fora da Initialization (as 3 de Init rodam
+// inline, sem gate). É a mesma contagem que a v2 mostra na confirmação do scope.
+const WF_INLINE_NOGATE = new Set(['workspace-scaffold', 'workspace-detection', 'state-init']);
+function scopeGateCount(scope, grid) {
+  const g = (grid || SCOPE_GRID_BASE)[scope];
+  if (!g) return 0;
+  return Object.entries(g).filter(([slug, v]) => v === 'EXECUTE' && !WF_INLINE_NOGATE.has(slug)).length;
+}
+
+// Arestas de sequência (dependências entre stages) — usadas pra desenhar o fluxo.
+const WF_EDGES = [
+  ['workspace-scaffold','workspace-detection'],['workspace-detection','state-init'],
+  ['intent-capture','market-research'],['intent-capture','feasibility'],['market-research','feasibility'],
+  ['intent-capture','scope-definition'],['feasibility','scope-definition'],
+  ['scope-definition','team-formation'],['scope-definition','rough-mockups'],['team-formation','rough-mockups'],
+  ['scope-definition','approval-handoff'],['team-formation','approval-handoff'],['rough-mockups','approval-handoff'],
+  ['state-init','reverse-engineering'],['state-init','practices-discovery'],['reverse-engineering','practices-discovery'],
+  ['approval-handoff','requirements-analysis'],['reverse-engineering','requirements-analysis'],['practices-discovery','requirements-analysis'],
+  ['requirements-analysis','user-stories'],['user-stories','refined-mockups'],
+  ['requirements-analysis','domain-design'],['refined-mockups','domain-design'],
+  ['domain-design','units-generation'],['units-generation','contract-design'],['contract-design','delivery-planning'],['units-generation','delivery-planning'],
+  ['units-generation','functional-design'],['units-generation','nfr-requirements'],['functional-design','nfr-requirements'],
+  ['nfr-requirements','nfr-design'],['nfr-design','infrastructure-design'],
+  ['functional-design','code-generation'],['nfr-design','code-generation'],['infrastructure-design','code-generation'],
+  ['code-generation','build-and-test'],['build-and-test','ci-pipeline'],
+  ['ci-pipeline','deployment-pipeline'],['infrastructure-design','deployment-pipeline'],
+  ['deployment-pipeline','environment-provisioning'],['deployment-pipeline','deployment-execution'],['environment-provisioning','deployment-execution'],
+  ['deployment-execution','observability-setup'],['observability-setup','incident-response'],
+  ['observability-setup','performance-validation'],['observability-setup','feedback-optimization'],
+  ['deployment-execution','feedback-optimization'],['incident-response','feedback-optimization'],['performance-validation','feedback-optimization']
+];
+
+// scope escolhido na aba (por intent). Default = scope real do estado.
+let wfScope = null;
+let wfScopeIntent = null; // dirName do intent cujo wfScope está setado (persiste entre refreshes)
+
+function renderWorkflowTab(state) {
+  const cols = wfCols();
+  const grid = buildScopeGrid();
+  const realScope = (state.scope || '').trim().toLowerCase();
+  const intentKey = (typeof selectedIntentDir !== 'undefined' && selectedIntentDir) || (typeof currentIntent === 'function' && currentIntent()?.dirName) || '__single';
+  // Reseta o scope escolhido só quando muda de intent — assim o auto-refresh não
+  // tira o usuário do scope que ele estava explorando (#9).
+  if (wfScope === null || !grid[wfScope] || wfScopeIntent !== intentKey) {
+    wfScope = grid[realScope] ? realScope : 'feature';
+    wfScopeIntent = intentKey;
+  }
+  const active = wfScope;
+  const activeGrid = grid[active] || grid.feature;
+  const isReal = active === realScope;
+
+  const stageStatus = slug => state.stages?.[slug]?.status || null;
+
+  // chips ordenados por nº de stages (inclui scopes externos/compostos)
+  const order = Object.keys(grid).sort((a, b) => scopeExecCount(a, grid) - scopeExecCount(b, grid));
+  const chips = order.map(scope => {
+    const n = scopeExecCount(scope, grid);
+    const g = scopeGateCount(scope, grid);
+    const tag = SCOPE_META[scope]?.tag ? `<span class="wf-chip-tag">${SCOPE_META[scope].tag}</span>` : (SCOPE_GRID_BASE[scope] ? '' : `<span class="wf-chip-tag">${t('wfComposed')}</span>`);
+    const realMark = scope === realScope ? ` <span class="wf-chip-real" title="${t('wfRealScope')}">●</span>` : '';
+    return `<button class="wf-chip ${scope === active ? 'active' : ''}" onclick="setWfScope('${esc(scope)}')" title="${g} ${t('wfGates')}">${esc(scope)}<span class="wf-chip-n">${n}</span>${tag}${realMark}</button>`;
+  }).join('');
+
+  // Gate de verificação entre fases (a v2 roda um em cada fronteira, exceto Init→Ideation)
+  const VG_AFTER = { ideation: 1, inception: 2, construction: 3 };
+  const board = cols.map((col, colIdx) => {
+    const cards = col.stages.map((slug, si) => {
+      const exec = activeGrid[slug] === 'EXECUTE';
+      const st = exec ? stageStatus(slug) : null;
+      let cls = exec ? 'exec ' + col.key : 'skip';
+      if (isReal && exec && st === 'done') cls += ' done';
+      else if (isReal && exec && st === 'active') cls += ' current';
+      return `<div class="wf-card ${cls}" data-slug="${esc(slug)}" title="${esc(stageDesc(slug))}">
+        <div class="wf-num">${colIdx}.${si + 1}</div>
+        <div class="wf-name">${esc(WF_STAGE_LABEL[slug] || slug)}</div>
+      </div>`;
+    }).join('');
+    // marcador de verification gate no rodapé da coluna que fecha uma fronteira
+    const vg = VG_AFTER[col.key]
+      ? `<div class="wf-vgate" title="${t('wfVGateTip')}">◈ ${tf('wfVGate', { n: VG_AFTER[col.key] })}</div>`
+      : '';
+    return `<div class="wf-col"><div class="wf-col-title">${esc(col.title)}</div>${cards}${vg}</div>`;
+  }).join('');
+
+  const n = scopeExecCount(active, grid);
+  const gates = scopeGateCount(active, grid);
+  const meta = SCOPE_META[active] || {};
+  const composedNote = SCOPE_GRID_BASE[active] ? '' : ` <span class="wf-hint">(${t('wfComposed')})</span>`;
+  const realLine = isReal
+    ? `<strong>${t('wfIsReal')}</strong> `
+    : `<span class="wf-hint">${tf('wfNotReal', { real: esc(realScope || '—') })}</span> `;
+  const srcLine = (typeof dashboardData !== 'undefined' && dashboardData && dashboardData.scopeGridSource)
+    ? `<div class="wf-src">${tf('wfGridSrc', { src: esc(dashboardData.scopeGridSource) })}</div>` : '';
+
+  return `
+    <div class="wf-head">
+      <h3 class="wf-title">${t('wfTitle')}</h3>
+      <p class="wf-sub">${t('wfSub')}</p>
+    </div>
+    <div class="wf-chips">${chips}</div>
+    <div class="wf-board-wrap" id="wf-board-wrap">
+      <svg class="wf-edges" id="wf-edges" aria-hidden="true"></svg>
+      <div class="wf-board" id="wf-board">${board}</div>
+    </div>
+    <div class="wf-caption">
+      ${realLine}<b>${esc(active)}</b>${composedNote} · ${esc(meta.desc || '')}. <b>${n} ${t('wfOf')} 33</b> ${t('wfStagesRun')} · <b>${gates}</b> ${t('wfGates')}.
+      ${srcLine}
+    </div>
+    <div class="wf-legend">
+      <span><span class="wf-swatch exec"></span>${t('wfLegExec')}</span>
+      <span><span class="wf-swatch skip"></span>${t('wfLegSkip')}</span>
+      <span><span class="wf-swatch done"></span>${t('wfLegDone')}</span>
+      <span><span class="wf-swatch current"></span>${t('wfLegCurrent')}</span>
+      <span>◈ ${t('wfVGateLeg')}</span>
+    </div>
+  `;
+}
+
+function setWfScope(scope) {
+  const grid = buildScopeGrid();
+  if (!grid[scope]) return;
+  wfScope = scope;
+  const el = document.getElementById('tab-workflow');
+  if (el && typeof dashboardData !== 'undefined' && dashboardData) {
+    const intent = currentIntent();
+    const state = intent ? parseState(intent.state) : {};
+    el.innerHTML = safeRender(renderWorkflowTab, state);
+    requestAnimationFrame(drawWfEdges);
+  }
+}
+
+const WF_SVGNS = 'http://www.w3.org/2000/svg';
+function drawWfEdges() {
+  const wrapEl = document.getElementById('wf-board-wrap');
+  const svg = document.getElementById('wf-edges');
+  const boardEl = document.getElementById('wf-board');
+  if (!wrapEl || !svg || !boardEl) return;
+  const active = wfScope && buildScopeGrid()[wfScope] ? wfScope : 'feature';
+  const grid = buildScopeGrid()[active];
+  const wr = wrapEl.getBoundingClientRect();
+  svg.setAttribute('viewBox', `0 0 ${wr.width} ${wr.height}`);
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const boxOf = slug => boardEl.querySelector(`.wf-card[data-slug="${slug}"]`);
+  WF_EDGES.forEach(([from, to]) => {
+    const a = boxOf(from), b = boxOf(to);
+    if (!a || !b) return;
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    let x1, y1, x2, y2;
+    if (rb.left > ra.left + 4) {
+      x1 = ra.right - wr.left; y1 = ra.top + ra.height / 2 - wr.top;
+      x2 = rb.left - wr.left;  y2 = rb.top + rb.height / 2 - wr.top;
+    } else {
+      x1 = ra.left + ra.width / 2 - wr.left; y1 = ra.bottom - wr.top;
+      x2 = rb.left + rb.width / 2 - wr.left; y2 = rb.top - wr.top;
+    }
+    const dx = (x2 - x1) * 0.5;
+    const d = Math.abs(x2 - x1) > 8
+      ? `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`
+      : `M${x1},${y1} C${x1},${y1 + 18} ${x2},${y2 - 18} ${x2},${y2}`;
+    const p = document.createElementNS(WF_SVGNS, 'path');
+    p.setAttribute('d', d);
+    if (grid[from] === 'EXECUTE' && grid[to] === 'EXECUTE') p.setAttribute('class', 'live');
+    svg.appendChild(p);
+  });
+}
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('resize', () => requestAnimationFrame(drawWfEdges));
+}
 </script>
 
 </body>
