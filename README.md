@@ -1,6 +1,6 @@
 # AIDLC Dashboard
 
-A real-time dashboard for [AI-DLC v2](https://github.com/awslabs/aidlc-workflows/tree/v2) workflows. It reads the `aidlc/` folder that the AI-DLC engine writes to your project and visualizes workflow status: phases, stages, approval gates, learned rules, audit trail and consumption (tokens/credits) — including **cost per stage**.
+A real-time dashboard for [AI-DLC](https://github.com/awslabs/aidlc-workflows) workflows (2.0, GA on `main`). It reads the `aidlc/` folder that the AI-DLC engine writes to your project and visualizes workflow status: the workflow shape per scope, phases, stages, approval gates, learned rules, audit trail with recorded decisions, an artifact file browser (with rendered Mermaid diagrams), and consumption (tokens/credits) — including **cost per stage**.
 
 ![AIDLC Dashboard — phases, stages and workflow progress](dashboard.png)
 
@@ -14,11 +14,20 @@ A real-time dashboard for [AI-DLC v2](https://github.com/awslabs/aidlc-workflows
 
 All three render the same UI. Pick whichever fits your workflow.
 
+## Tabs
+
+- **Workflow** (default) — the shape of the run: which of the **33 stages** execute under the active scope (highlighted per phase, skipped ones dimmed), approval-gate counts, and the live done/current stages. Chips preview all 11 scopes.
+- **Phases / Stages** — phase progress and per-stage status, agent and timing; click any item for details.
+- **Files** — browse the `aidlc/` artifact tree and read `.md`/`.json` in place, with **Mermaid diagrams rendered inline**.
+- **Knowledge** — learned decisions and NEVER/ALWAYS rules.
+- **Audit** — a Recorded Decisions card (stage + rationale) plus the event timeline.
+- **Tokens** — token/credit usage and cost per stage (auto-refreshing).
+
 ## Option 1 — Standalone HTML (no install)
 
 1. Download `dashboard.html` and open it in **Chrome, Edge or Opera**
 2. Click **Open aidlc Folder** and select the `aidlc/` folder of your project
-3. Done — it auto-refreshes every 5 seconds while the workflow runs
+3. Done — it auto-refreshes every 5 seconds while the workflow runs (token/credit data refreshes on its own timer too)
 
 Great for following a live workflow, workshops, or sharing progress with stakeholders. UI in English, Portuguese and Spanish (auto-detected, manual selector, English fallback).
 
@@ -45,11 +54,7 @@ npm run server -- /path/to/your/project
 npm run server
 ```
 
-Then open the URL printed in your terminal (base `http://localhost:3939`). The server auto-increments to the next free port, so you can run several projects at once (e.g. `3939`, `3940`, ...). Override the base port with the `PORT` env variable.
-
-Updates are pushed **instantly over WebSocket** by a file watcher on the `aidlc/` folder — no 5-second polling. It renders the same UI (phases, stages, workflow, knowledge, audit, tokens) as the other two options and stays **fully local**. Requires **Node.js ≥ 18** and works in any modern browser.
-
-See [`web/README.md`](web/README.md) for the quick-start and REST API details.
+Then open the URL printed in your terminal (base `http://localhost:3939`). The server auto-increments to the next free port, so you can run several projects at once (e.g. `3939`, `3940`, …). Override the base port with the `PORT` env variable. Updates are pushed **instantly over WebSocket** by a file watcher on the `aidlc/` folder — no 5-second polling. It renders the same UI (workflow, phases, stages, files, knowledge, audit, tokens) as the other two options and stays **fully local**. Requires **Node.js ≥ 18** and works in any modern browser. See [`web/README.md`](web/README.md) for the quick-start and REST API details.
 
 ## Consumption & cost per stage
 
@@ -64,7 +69,7 @@ In the standalone HTML, point the Tokens tab at your transcripts folder; the ext
 
 ## Requirements
 
-- An AI-DLC v2 workflow (the dashboard reads its `aidlc/` folder) — any harness: Kiro IDE, Kiro CLI or Claude Code
+- An AI-DLC workflow (the dashboard reads its `aidlc/` folder) — any harness: Kiro IDE, Kiro CLI or Claude Code
 - Standalone HTML: a Chromium-based browser (File System Access API)
 - Extension: Kiro IDE or VS Code ≥ 1.80
 - Web server: Node.js ≥ 18 and any modern browser (no File System Access API needed)
