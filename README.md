@@ -17,6 +17,7 @@ All three render the same UI. Pick whichever fits your workflow.
 ## Tabs
 
 - **Workflow** (default) — the shape of the run: which of the **33 stages** execute under the active scope (highlighted per phase, skipped ones dimmed), approval-gate counts, and the live done/current stages. Chips preview all 11 scopes.
+  - **Units & Bolts** — once Units Generation produces units, the Workflow tab shows the Construction plan (units, Bolt sequence, walking skeleton); during Construction it switches to a live panel (done/running/queued/failed Bolts, per-unit progress through 3.1 → 3.5, DAG dependencies); afterwards it collapses to a read-only summary. Intents without units keep the stage grid.
 - **Phases / Stages** — phase progress and per-stage status, agent and timing; click any item for details.
 - **Files** — browse the `aidlc/` artifact tree and read `.md`/`.json` in place, with **Mermaid diagrams rendered inline**.
 - **Knowledge** — learned decisions and NEVER/ALWAYS rules.

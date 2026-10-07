@@ -1,6 +1,6 @@
 {
   "name": "aidlc-dashboard-web",
-  "version": "0.2.3",
+  "version": "0.2.5",
   "description": "AIDLC Dashboard web-server variant — runs in any browser via a small Node.js backend (Express + WebSocket)",
   "main": "server.js",
   "scripts": {

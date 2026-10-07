@@ -2,7 +2,7 @@
 'use strict';
 
 // AIDLC Dashboard — web server variant.
-// Serves the same v0.2.3 UI as dashboard.html to any browser (no File System
+// Serves the same v0.2.5 UI as dashboard.html to any browser (no File System
 // Access API needed) via Express static + a WebSocket that pushes fresh data
 // whenever the project's aidlc/ folder changes (recursive fs.watch).
 //
@@ -94,6 +94,11 @@ async function loadDashboard() {
     intentData.state = await readText(path.join(intentDir, 'aidlc-state.md'));
     intentData.graph = await readJson(path.join(intentDir, 'runtime-graph.json'));
     intentData.recovery = await readText(path.join(intentDir, '.aidlc-recovery.md'));
+    // Units & Bolts artifacts (only exist from stages 2.7 / 2.9 on) — same paths
+    // as UNITS_ARTIFACTS in the dashboard's 03-data-layer.js.
+    intentData.unitsDag = await readText(path.join(intentDir, 'inception', 'units-generation', 'unit-of-work-dependency.md'));
+    intentData.unitsDoc = await readText(path.join(intentDir, 'inception', 'units-generation', 'unit-of-work.md'));
+    intentData.boltPlan = await readText(path.join(intentDir, 'inception', 'delivery-planning', 'bolt-plan.md'));
 
     // Graph unreadable this cycle? Reuse the previous cycle's graph (better than
     // nulling it while a runtime-graph.json is being rewritten).
@@ -342,7 +347,82 @@ function stopWatcher() {
   if (watcher) { watcher.close(); watcher = null; }
 }
 
+// ─── File browser (Files tab): tree + read, rooted at aidlc/ ─────────────────
+// Same contract as the IDE extension host (listTree → tree, readFile → file).
+
+const FB_EXTS = ['.md', '.json', '.txt', '.yaml', '.yml'];
+const FB_SKIP_DIRS = new Set(['.aidlc-hooks-health', '.aidlc-stop-hook', '.aidlc-sessions', 'node_modules', '.git', 'templates']);
+function fbInteresting(name) {
+  if (name.startsWith('.') && !name.endsWith('.md')) return false;
+  return FB_EXTS.some(e => name.toLowerCase().endsWith(e));
+}
+
+async function walkTree(absDir, relBase, depth) {
+  if (depth > 6) return [];
+  let entries = [];
+  try { entries = await fs.readdir(absDir, { withFileTypes: true }); } catch { return []; }
+  const out = [];
+  for (const e of entries) {
+    const rel = relBase ? relBase + '/' + e.name : e.name;
+    if (e.isDirectory()) {
+      if (FB_SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+      const children = await walkTree(path.join(absDir, e.name), rel, depth + 1);
+      if (children.length) out.push({ name: e.name, path: rel, kind: 'dir', children });
+    } else if (e.isFile() && fbInteresting(e.name)) {
+      out.push({ name: e.name, path: rel, kind: 'file' });
+    }
+  }
+  out.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1));
+  return out;
+}
+
+async function loadTree() {
+  const root = aidlcRoot();
+  if (!root) return [];
+  const activeSpaceRaw = await readText(path.join(root, 'active-space'));
+  const space = (activeSpaceRaw ? activeSpaceRaw.trim() : 'default') || 'default';
+  const spaceDir = path.join(root, 'spaces', space);
+  const roots = [];
+  const intentsBase = path.join(spaceDir, 'intents');
+  try {
+    for (const e of await fs.readdir(intentsBase, { withFileTypes: true })) {
+      if (e.isDirectory() && !e.name.startsWith('.')) {
+        const relBase = `spaces/${space}/intents/${e.name}`;
+        const children = await walkTree(path.join(intentsBase, e.name), relBase, 0);
+        if (children.length) roots.push({ name: e.name, path: relBase, kind: 'dir', children });
+      }
+    }
+  } catch { /* no intents */ }
+  for (const sub of ['memory', 'codekb']) {
+    const relBase = `spaces/${space}/${sub}`;
+    const children = await walkTree(path.join(spaceDir, sub), relBase, 0);
+    if (children.length) roots.push({ name: sub, path: relBase, kind: 'dir', children });
+  }
+  return roots;
+}
+
+// Read one file by its path relative to aidlc/. Path-traversal guard: the
+// resolved path must stay under the aidlc/ root, and only browsable extensions.
+async function readAidlcFile(relPath) {
+  const root = aidlcRoot();
+  if (!root || typeof relPath !== 'string') return null;
+  const rootResolved = path.resolve(root);
+  const abs = path.resolve(rootResolved, relPath);
+  if (!abs.startsWith(rootResolved + path.sep)) return null;
+  if (!fbInteresting(path.basename(abs))) return null;
+  return readText(abs);
+}
+
 // ─── WebSocket ──────────────────────────────────────────────────────────────
+
+// Only accept sockets opened by this server's own page. Browsers always send
+// Origin on WebSocket handshakes, so this stops another site open in the same
+// browser from connecting to ws://127.0.0.1:<port> (cross-site WS hijacking).
+function isAllowedOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // non-browser clients (curl, scripts) on loopback
+  try { return new URL(origin).host === req.headers.host; } catch { return false; }
+}
 
 function broadcast(type) {
   const msg = JSON.stringify({ type });
@@ -351,7 +431,8 @@ function broadcast(type) {
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  if (!isAllowedOrigin(req)) { ws.close(1008, 'origin not allowed'); return; }
   ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
@@ -376,6 +457,10 @@ wss.on('connection', (ws) => {
     } else if (msg.type === 'refreshTokens') {
       const tokens = await loadTokens();
       ws.send(JSON.stringify({ type: 'tokens', tokens }));
+    } else if (msg.type === 'listTree') {
+      ws.send(JSON.stringify({ type: 'tree', tree: await loadTree() }));
+    } else if (msg.type === 'readFile') {
+      ws.send(JSON.stringify({ type: 'file', path: msg.path, content: await readAidlcFile(msg.path) }));
     } else if (msg.type === 'getProject') {
       ws.send(JSON.stringify({ type: 'project', path: projectPath }));
     }

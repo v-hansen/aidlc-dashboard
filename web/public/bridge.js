@@ -43,6 +43,16 @@ function connectWebSocket() {
       tokenData = msg.tokens;
       const el = document.getElementById('tab-tokens');
       if (el) el.innerHTML = safeRender(renderTokensTab);
+    } else if (msg.type === 'tree') {
+      fbLoading = false;
+      fbTree = msg.tree || [];
+      const el = document.getElementById('tab-files');
+      if (el) { el.innerHTML = safeRender(renderFilesTab); if (activeTab === 'files') requestAnimationFrame(runMermaid); }
+    } else if (msg.type === 'file') {
+      fbContentCache[msg.path] = msg.content != null ? msg.content : ('(could not read ' + msg.path + ')');
+      fbSelectedPath = msg.path;
+      const el = document.getElementById('tab-files');
+      if (el) { el.innerHTML = safeRender(renderFilesTab); requestAnimationFrame(runMermaid); }
     } else if (msg.type === 'refresh') {
       // Server signalled a file change — ask for fresh data.
       if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'refresh' }));
@@ -194,6 +204,25 @@ async function refreshData() {
 
 async function refreshTokens() {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'refreshTokens' }));
+}
+
+// File browser (Files tab): ask the server for the tree and file contents —
+// the page has no filesystem access of its own.
+async function loadFileTree() {
+  if (fbLoading) return;
+  if (!ws || ws.readyState !== 1) return;
+  fbLoading = true;
+  ws.send(JSON.stringify({ type: 'listTree' }));
+}
+
+async function openAidlcFile(path) {
+  fbSelectedPath = path;
+  if (fbContentCache[path] != null) {
+    const el = document.getElementById('tab-files');
+    if (el) { el.innerHTML = safeRender(renderFilesTab); requestAnimationFrame(runMermaid); }
+  } else if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'readFile', path }));
+  }
 }
 
 // Auto-refresh is handled server-side by the file watcher (WebSocket push).

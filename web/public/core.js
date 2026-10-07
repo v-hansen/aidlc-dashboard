@@ -1,10 +1,4 @@
-// AIDLC Dashboard — rendering engine (core.js)
-// EXTRACTED from dashboard.html v0.2.3 (the source of truth). This file contains
-// the environment-agnostic rendering/parsing/i18n engine. The File System Access
-// API layer, polling loops and DOMContentLoaded init are provided by bridge.js
-// (loaded AFTER this file), which talks to the Node.js server over WebSocket.
 
-// ==== PART 0: i18n helpers ====
 // PART 0: i18n - detecção de idioma, helpers e seletor
 const LOCALES = { pt: 'pt-BR', en: 'en-US', es: 'es-ES' };
 const I18N = {}; // preenchido nos blocos I18N.pt / I18N.en / I18N.es
@@ -68,10 +62,11 @@ function renderLangSelector() {
   ).join('') + '</div>';
 }
 
-// ==== PART 1: constants (APP_VERSION / PHASES / PHASE_LABELS) ====
+;
+
 // PART 1: Data structures and constants
 // Substituído pelo build.js com a versão do aidlc-dashboard-extension/package.json
-const APP_VERSION = '0.2.3';
+const APP_VERSION = '0.2.5';
 
 const PHASES = [
   { id:'initialization', stages:['workspace-scaffold','workspace-detection','state-init'] },
@@ -88,7 +83,8 @@ const PHASE_LABELS = {
   operation: { pt:'Operação (Operation)', en:'Operation', es:'Operación (Operation)' }
 };
 
-// ==== PART 2: stage descriptions ====
+;
+
 // PART 2: Stage descriptions (what each stage does)
 const STAGE_INFO = {
   'workspace-scaffold': { desc:'Cria a estrutura de pastas do AIDLC no workspace', agent:'orchestrator' },
@@ -126,9 +122,15 @@ const STAGE_INFO = {
   'feedback-optimization': { desc:'Coleta feedback e otimiza', agent:'aidlc-operations-agent' }
 };
 
-// ==== PART 3: parsing utilities (FS Access readers omitted — see bridge.js) ====
+;
+
 // PART 3: File reading and parsing utilities
 let dashboardData = null;
+
+async function readFileFromHandle(fileHandle) {
+  const file = await fileHandle.getFile();
+  return await file.text();
+}
 
 // Parse tolerante: o engine reescreve os JSONs durante o workflow e uma leitura
 // pode pegar o arquivo no meio da escrita — nunca deixe isso derrubar o refresh.
@@ -136,7 +138,196 @@ function safeJsonParse(text) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
-// ==== PART 4: state parsing helpers ====
+async function findFile(dirHandle, path) {
+  const parts = path.split('/').filter(Boolean);
+  let current = dirHandle;
+  for (let i = 0; i < parts.length - 1; i++) {
+    try { current = await current.getDirectoryHandle(parts[i]); }
+    catch { return null; }
+  }
+  try { return await current.getFileHandle(parts[parts.length - 1]); }
+  catch { return null; }
+}
+
+async function findDir(dirHandle, path) {
+  const parts = path.split('/').filter(Boolean);
+  let current = dirHandle;
+  for (const part of parts) {
+    try { current = await current.getDirectoryHandle(part); }
+    catch { return null; }
+  }
+  return current;
+}
+
+async function listFiles(dirHandle) {
+  const files = [];
+  for await (const entry of dirHandle.values()) {
+    files.push({ name: entry.name, kind: entry.kind, handle: entry });
+  }
+  return files;
+}
+
+// --- File browser (aba Arquivos) ---
+// Extensões legíveis e ruído a esconder na árvore.
+const FILE_BROWSER_EXTS = ['.md', '.json', '.txt', '.yaml', '.yml'];
+const FILE_BROWSER_SKIP_DIRS = new Set(['.aidlc-hooks-health', '.aidlc-stop-hook', '.aidlc-sessions', 'node_modules', '.git', 'templates']);
+function fbInteresting(name) {
+  if (name.startsWith('.') && !name.endsWith('.md')) return false; // .DS_Store, .last, dotfiles
+  return FILE_BROWSER_EXTS.some(e => name.toLowerCase().endsWith(e));
+}
+
+// Lista recursivamente uma pasta (FS Access API) em nós {name,path,kind,children}.
+// path é relativo ao rootHandle. Profundidade limitada; pastas de ruído ignoradas.
+async function listTree(dirHandle, basePath, depth) {
+  if (depth > 6) return [];
+  const out = [];
+  for await (const entry of dirHandle.values()) {
+    const rel = basePath ? basePath + '/' + entry.name : entry.name;
+    if (entry.kind === 'directory') {
+      if (FILE_BROWSER_SKIP_DIRS.has(entry.name) || (entry.name.startsWith('.') && entry.name !== '.')) continue;
+      const children = await listTree(entry, rel, depth + 1);
+      if (children.length) out.push({ name: entry.name, path: rel, kind: 'dir', children });
+    } else if (entry.kind === 'file' && fbInteresting(entry.name)) {
+      out.push({ name: entry.name, path: rel, kind: 'file' });
+    }
+  }
+  // pastas antes de arquivos, cada grupo alfabético
+  out.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1));
+  return out;
+}
+
+// Constrói a árvore de arquivos do intent atual (+ memory/codekb do space).
+// Chamada sob demanda ao abrir a aba (não no refresh de 5s).
+async function buildFileTree(rootHandle, activeSpace, intentDirName) {
+  const roots = [];
+  const intentDir = await findDir(rootHandle, `spaces/${activeSpace}/intents/${intentDirName}`);
+  if (intentDir) roots.push({ name: intentDirName, path: `spaces/${activeSpace}/intents/${intentDirName}`, kind: 'dir', children: await listTree(intentDir, `spaces/${activeSpace}/intents/${intentDirName}`, 0) });
+  const memDir = await findDir(rootHandle, `spaces/${activeSpace}/memory`);
+  if (memDir) roots.push({ name: 'memory', path: `spaces/${activeSpace}/memory`, kind: 'dir', children: await listTree(memDir, `spaces/${activeSpace}/memory`, 0) });
+  const kbDir = await findDir(rootHandle, `spaces/${activeSpace}/codekb`);
+  if (kbDir) roots.push({ name: 'codekb', path: `spaces/${activeSpace}/codekb`, kind: 'dir', children: await listTree(kbDir, `spaces/${activeSpace}/codekb`, 0) });
+  return roots;
+}
+
+// Lê um arquivo pelo caminho relativo ao root (só-leitura, on-demand).
+async function readAidlcFile(rootHandle, relPath) {
+  const f = await findFile(rootHandle, relPath);
+  if (!f) return null;
+  return await readFileFromHandle(f);
+}
+
+// Artefatos de units/bolts, relativos ao diretório do intent (<record>).
+// Mantenha em sincronia com aidlc-dashboard-extension/src/extension.ts.
+const UNITS_ARTIFACTS = [
+  ['unitsDag', 'inception/units-generation/unit-of-work-dependency.md'],
+  ['unitsDoc', 'inception/units-generation/unit-of-work.md'],
+  ['boltPlan', 'inception/delivery-planning/bolt-plan.md'],
+];
+
+async function loadDashboardData(rootHandle) {
+  const data = { intents: [], activeSpace: 'default', cloneId: '' };
+
+  // Read active-space
+  const asFile = await findFile(rootHandle, 'active-space');
+  if (asFile) data.activeSpace = (await readFileFromHandle(asFile)).trim();
+
+  // Read clone-id
+  const cidFile = await findFile(rootHandle, '.aidlc-clone-id');
+  if (cidFile) data.cloneId = (await readFileFromHandle(cidFile)).trim();
+
+  // Read intents.json
+  const intentsFile = await findFile(rootHandle, `spaces/${data.activeSpace}/intents/intents.json`);
+  if (!intentsFile) { data.errorKey = 'notAidlc'; return data; }
+  const intentsJson = safeJsonParse(await readFileFromHandle(intentsFile));
+  if (!intentsJson) {
+    // intents.json ilegível neste instante: preserva os dados do refresh anterior
+    if (dashboardData && dashboardData.intents && dashboardData.intents.length) return dashboardData;
+    data.errorKey = 'notAidlc';
+    return data;
+  }
+
+  // For each intent, load state and runtime-graph
+  // Cada intent é isolado: um arquivo quebrado não derruba os demais nem o refresh
+  for (const intent of intentsJson) {
+    try {
+      const intentDir = await findDir(rootHandle, `spaces/${data.activeSpace}/intents/${intent.dirName}`);
+      if (!intentDir) continue;
+
+      const stateFile = await findFile(intentDir, 'aidlc-state.md');
+      const graphFile = await findFile(intentDir, 'runtime-graph.json');
+      const recoveryFile = await findFile(intentDir, '.aidlc-recovery.md');
+
+      const intentData = { ...intent, state: null, graph: null, recovery: null, audit: [] };
+
+      if (stateFile) intentData.state = await readFileFromHandle(stateFile);
+      if (graphFile) intentData.graph = safeJsonParse(await readFileFromHandle(graphFile));
+      if (recoveryFile) intentData.recovery = await readFileFromHandle(recoveryFile);
+
+      // Units & Bolts (opcionais — só existem a partir das stages 2.7 / 2.9)
+      for (const [key, rel] of UNITS_ARTIFACTS) {
+        const f = await findFile(intentDir, rel);
+        intentData[key] = f ? await readFileFromHandle(f) : null;
+      }
+
+      // Graph ilegível neste ciclo? Reaproveita o do refresh anterior (melhor que zerar)
+      if (!intentData.graph && dashboardData) {
+        const prev = (dashboardData.intents || []).find(i => i.dirName === intent.dirName);
+        if (prev && prev.graph) intentData.graph = prev.graph;
+      }
+
+      // Load audit files
+      const auditDir = await findDir(intentDir, 'audit');
+      if (auditDir) {
+        const auditFiles = await listFiles(auditDir);
+        for (const af of auditFiles) {
+          if (af.kind === 'file' && af.name.endsWith('.md')) {
+            try {
+              intentData.audit.push({ name: af.name, content: await readFileFromHandle(af.handle) });
+            } catch { /* arquivo de audit em escrita — ignora neste ciclo */ }
+          }
+        }
+      }
+      data.intents.push(intentData);
+    } catch (e) {
+      console.warn('intent ilegível neste ciclo:', intent.dirName, e);
+    }
+  }
+
+  // Load memory (project rules)
+  const projectFile = await findFile(rootHandle, `spaces/${data.activeSpace}/memory/project.md`);
+  if (projectFile) data.projectMemory = await readFileFromHandle(projectFile);
+
+  // Grid de scopes compilado (opcional): a v2 escreve scopes compostos/custom em
+  // scope-grid.json. Se existir no projeto, a aba Workflow o mescla sobre o grid
+  // hardcoded — assim scopes compostos aparecem sem re-sincronizar o código.
+  // Tenta caminhos comuns por harness (o dashboard aponta pra pasta do projeto).
+  const gridCandidates = [
+    'scope-grid.json',
+    '.claude/tools/data/scope-grid.json',
+    '.kiro/tools/data/scope-grid.json',
+    '.aidlc/tools/data/scope-grid.json',
+    '.codex/tools/data/scope-grid.json',
+    '.cursor/tools/data/scope-grid.json',
+    '.github/aidlc/tools/data/scope-grid.json',
+  ];
+  for (const cand of gridCandidates) {
+    const f = await findFile(rootHandle, cand);
+    if (f) {
+      const parsed = safeJsonParse(await readFileFromHandle(f));
+      if (parsed && typeof parsed === 'object') { data.scopeGrid = parsed; data.scopeGridSource = cand; break; }
+    }
+  }
+  // Preserva o grid do ciclo anterior se este ciclo não achou (arquivo em escrita)
+  if (!data.scopeGrid && dashboardData && dashboardData.scopeGrid) {
+    data.scopeGrid = dashboardData.scopeGrid;
+    data.scopeGridSource = dashboardData.scopeGridSource;
+  }
+
+  return data;
+}
+
+;
+
 // PART 4: State parsing helpers
 function parseState(stateMarkdown) {
   if (!stateMarkdown) return {};
@@ -209,7 +400,8 @@ function formatDate(iso) {
   return d.toLocaleDateString(LOCALES[lang] || 'en-US', { day:'2-digit', month:'2-digit', year:'numeric' });
 }
 
-// ==== PART 5: render functions (load screen, dashboard shell, status badge) ====
+;
+
 // PART 5: Render functions
 function renderLoadScreen() {
   return `
@@ -331,6 +523,7 @@ function renderDashboard(data) {
       <button class="tab-btn active" data-tab="workflow" role="tab" aria-selected="true" onclick="switchTab('workflow')">${t('tabWorkflow')}</button>
       <button class="tab-btn" data-tab="phases" role="tab" aria-selected="false" onclick="switchTab('phases')">${t('tabPhases')}</button>
       <button class="tab-btn" data-tab="stages" role="tab" aria-selected="false" onclick="switchTab('stages')">${t('tabStages')}</button>
+      <button class="tab-btn" data-tab="files" role="tab" aria-selected="false" onclick="switchTab('files')">${t('tabFiles')}</button>
       <button class="tab-btn" data-tab="sensors" role="tab" aria-selected="false" onclick="switchTab('sensors')" hidden>${t('tabSensors')}</button>
       <button class="tab-btn" data-tab="knowledge" role="tab" aria-selected="false" onclick="switchTab('knowledge')">${t('tabKnowledge')}</button>
       <button class="tab-btn" data-tab="audit" role="tab" aria-selected="false" onclick="switchTab('audit')">${t('tabAudit')}</button>
@@ -341,6 +534,7 @@ function renderDashboard(data) {
     <div id="tab-workflow" class="tab-content active" role="tabpanel">${safeRender(renderWorkflowTab, state)}</div>
     <div id="tab-phases" class="tab-content" role="tabpanel">${safeRender(renderPhasesTab, state, graph)}</div>
     <div id="tab-stages" class="tab-content" role="tabpanel">${safeRender(renderStagesTab, state, graph)}</div>
+    <div id="tab-files" class="tab-content" role="tabpanel">${safeRender(renderFilesTab)}</div>
     <div id="tab-sensors" class="tab-content" role="tabpanel">${safeRender(renderSensorsTab, graph)}</div>
     <div id="tab-knowledge" class="tab-content" role="tabpanel">${safeRender(renderKnowledgeTab, data, state)}</div>
     <div id="tab-audit" class="tab-content" role="tabpanel">${safeRender(renderAuditTab, intent)}</div>
@@ -363,7 +557,8 @@ function renderStatusBadge(status) {
   return `<span class="badge ${cls}">● ${label}</span>`;
 }
 
-// ==== PART 6: tab renderers (phases, stages) ====
+;
+
 // PART 6: Tab renderers - Phases & Stages
 function renderPhasesTab(state, graph) {
   let html = '<ul class="phase-list">';
@@ -425,7 +620,8 @@ function renderStagesTab(state, graph) {
   return html;
 }
 
-// ==== PART 7: tab renderers (sensors, knowledge) ====
+;
+
 // PART 7: Tab renderers - Sensors & Knowledge
 function renderSensorsTab(graph) {
   if (!graph || !graph.stages) return `<div class="empty-state">${t('sNone')}</div>`;
@@ -504,37 +700,62 @@ function renderKnowledgeTab(data, state) {
   return html;
 }
 
-// ==== PART 8: tab renderers (audit, help) ====
+;
+
 // PART 8: Tab renderers - Audit & Help
 function renderAuditTab(intent) {
   if (!intent.audit || !intent.audit.length) return `<div class="empty-state">${t('aNone')}</div>`;
-  let html = `<div class="card"><h2>${t('aTitle')}</h2><div class="timeline">`;
 
-  // Parse audit events from all files
+  // Parse audit events: captura TODOS os pares "**Campo**: valor" de cada seção,
+  // não só o Event/Timestamp — é onde vivem as decisões, rationale e mensagens.
   const events = [];
   for (const auditFile of intent.audit) {
     const sections = auditFile.content.split('---').filter(s => s.trim());
     for (const section of sections) {
-      const tsMatch = section.match(/\*\*Timestamp\*\*:\s*(.+)/);
-      const evMatch = section.match(/\*\*Event\*\*:\s*(.+)/);
-      if (tsMatch && evMatch) {
-        events.push({
-          ts: tsMatch[1].trim(),
-          event: evMatch[1].trim(),
-          detail: section.replace(/#+.*/g,'').replace(/\*\*\w+\*\*:.+/g,'').trim().split('\n').filter(l=>l.trim()).join(' ').substring(0,120)
-        });
+      const fields = {};
+      const fieldRx = /\*\*([\w ]+)\*\*:\s*(.+)/g;
+      let fm;
+      while ((fm = fieldRx.exec(section))) fields[fm[1].trim().toLowerCase()] = fm[2].trim();
+      if (fields.timestamp && fields.event) {
+        events.push({ ts: fields.timestamp, event: fields.event, fields });
       }
     }
   }
+  if (!events.length) return `<div class="empty-state">${t('aNone')}</div>`;
+  events.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
 
-  // Show last 30 events
-  const recent = events.slice(-30);
+  // Card de destaque: só as decisões (o que o usuário quer ler primeiro)
+  const decisions = events.filter(e => e.event === 'DECISION_RECORDED' && e.fields.decision);
+  let html = '';
+  if (decisions.length) {
+    html += `<div class="card"><h2>📝 ${t('aDecisions')}</h2>`;
+    for (const d of decisions) {
+      const stage = d.fields.stage ? WF_STAGE_LABEL[d.fields.stage] || d.fields.stage : '';
+      html += `
+        <div class="audit-decision">
+          <div class="audit-decision-head">
+            ${stage ? `<span class="badge badge-purple">${esc(stage)}</span>` : ''}
+            <span class="audit-decision-ts">${formatTime(d.ts)} · ${formatDate(d.ts)}</span>
+          </div>
+          <div class="audit-decision-body">${esc(d.fields.decision)}</div>
+        </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Timeline completa com o detalhe relevante por tipo de evento
+  html += `<div class="card"><h2>${t('aTitle')}</h2><div class="timeline">`;
+  const detailFor = (f) => f.decision || f.message || f.details || f.rule || f.request
+    || (f.stage ? (WF_STAGE_LABEL[f.stage] || f.stage) : '') || '';
+  const recent = events.slice(-40);
   for (const ev of recent) {
     const key = 'ev' + ev.event;
     const label = (I18N[lang]?.[key] ?? I18N.en?.[key]) || `📋 ${esc(ev.event)}`;
+    const detail = detailFor(ev.fields);
     html += `
       <div class="timeline-event">
         <div><strong>${label}</strong></div>
+        ${detail ? `<div class="timeline-detail">${esc(detail)}</div>` : ''}
         <div class="timeline-ts">${formatTime(ev.ts)} — ${formatDate(ev.ts)}</div>
       </div>`;
   }
@@ -583,9 +804,108 @@ function renderHelpTab() {
   `;
 }
 
-// ==== PART 8.4: tokens — state + cost/credit math (FS Access loaders omitted) ====
+;
+
+// PART 8.4: Tokens - lê transcripts do harness (~/.claude/projects/<projeto>/*.jsonl)
 let tokenData = null;
 let tokenDirHandle = null;
+
+async function openTokensFolder() {
+  try {
+    tokenDirHandle = await window.showDirectoryPicker({ mode: 'read' });
+    await loadTokenData();
+    lastTokenRefresh = new Date();
+    const el = document.getElementById('tab-tokens');
+    if (el) el.innerHTML = renderTokensTab();
+    if (typeof startTokenRefresh === 'function') startTokenRefresh();
+  } catch (err) {
+    if (err.name !== 'AbortError') alert(t('errRead') + err.message);
+  }
+}
+
+// Coleta *.jsonl recursivamente (Claude: plano; Kiro: <hash>/sess_<id>/messages.jsonl)
+async function collectJsonlFiles(dirHandle, depth, out) {
+  if (depth > 3) return;
+  for await (const entry of dirHandle.values()) {
+    if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
+      out.push({ handle: entry, parentDir: dirHandle });
+    } else if (entry.kind === 'directory') {
+      await collectJsonlFiles(entry, depth + 1, out);
+    }
+  }
+}
+
+async function loadTokenData() {
+  if (!tokenDirHandle) return;
+  const agg = { input:0, output:0, cacheRead:0, cacheWrite:0, messages:0, sessions:[], byModel:{}, kiroSessions:[], events:[], kiroEvents:[], kiroCredits:0 };
+  const files = [];
+  await collectJsonlFiles(tokenDirHandle, 0, files);
+  for (const { handle: entry, parentDir } of files) {
+    const file = await entry.getFile();
+    const text = await file.text();
+    // Detecção de formato Kiro: session_metadata/contextUsage ou resumos de turno com créditos
+    if (text.includes('"contextUsage"') || text.includes('session_metadata') || text.includes('"promptTurnSummaries"')) {
+      const kiroSess = { title: entry.name, modelId: '', lastModifiedAt: null, lines: 0, contextPct: 0, credits: 0, turns: 0 };
+      try {
+        const sjHandle = await parentDir.getFileHandle('session.json');
+        const sj = JSON.parse(await (await sjHandle.getFile()).text());
+        kiroSess.title = sj.title || kiroSess.title;
+        kiroSess.modelId = sj.modelId || '';
+        kiroSess.lastModifiedAt = sj.lastModifiedAt || null;
+      } catch {}
+      for (const line of text.split('\n')) {
+        if (!line.trim()) continue;
+        kiroSess.lines++;
+        const m = line.match(/"usagePercentage":\s*([\d.]+)/);
+        if (m) kiroSess.contextPct = Math.max(kiroSess.contextPct, parseFloat(m[1]));
+        // Créditos por turno: payload.promptTurnSummaries[].usage
+        if (line.includes('"promptTurnSummaries"')) {
+          try {
+            const d = JSON.parse(line);
+            const arr = (d.payload && d.payload.promptTurnSummaries) || [];
+            const credits = arr.reduce((a, x) => a + (x.usage || 0), 0);
+            if (credits > 0) {
+              kiroSess.credits += credits;
+              kiroSess.turns++;
+              agg.kiroCredits += credits;
+              agg.kiroEvents.push({ ts: d.timestamp || null, credits });
+            }
+          } catch {}
+        }
+      }
+      agg.kiroSessions.push(kiroSess);
+      continue;
+    }
+    const sess = { name: entry.name.replace('.jsonl',''), input:0, output:0, cacheRead:0, cacheWrite:0, messages:0, firstTs:null, lastTs:null };
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let d; try { d = JSON.parse(line); } catch { continue; }
+      const usage = d.message?.usage;
+      if (!usage) continue;
+      const model = d.message?.model || 'desconhecido';
+      sess.messages++; agg.messages++;
+      sess.input += usage.input_tokens||0; agg.input += usage.input_tokens||0;
+      sess.output += usage.output_tokens||0; agg.output += usage.output_tokens||0;
+      sess.cacheRead += usage.cache_read_input_tokens||0; agg.cacheRead += usage.cache_read_input_tokens||0;
+      sess.cacheWrite += usage.cache_creation_input_tokens||0; agg.cacheWrite += usage.cache_creation_input_tokens||0;
+      if (!agg.byModel[model]) agg.byModel[model] = { input:0, output:0, messages:0 };
+      agg.byModel[model].input += usage.input_tokens||0;
+      agg.byModel[model].output += usage.output_tokens||0;
+      agg.byModel[model].messages++;
+      agg.events.push({ ts: d.timestamp || null, model,
+        i: usage.input_tokens||0, o: usage.output_tokens||0,
+        cr: usage.cache_read_input_tokens||0, cw: usage.cache_creation_input_tokens||0 });
+      if (d.timestamp) {
+        if (!sess.firstTs || d.timestamp < sess.firstTs) sess.firstTs = d.timestamp;
+        if (!sess.lastTs || d.timestamp > sess.lastTs) sess.lastTs = d.timestamp;
+      }
+    }
+    if (sess.messages > 0) agg.sessions.push(sess);
+  }
+  agg.sessions.sort((a,b) => (b.lastTs||'').localeCompare(a.lastTs||''));
+  agg.kiroSessions.sort((a,b) => (b.lastModifiedAt||0) - (a.lastModifiedAt||0));
+  tokenData = agg;
+}
 
 function fmtTokens(n) {
   if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
@@ -661,7 +981,8 @@ function computeStageCredits(graph, kiroEvents) {
   return { rows: ordered, total };
 }
 
-// ==== PART 8.45: render Tokens tab ====
+;
+
 // PART 8.45: Render da aba Tokens
 function renderTokensTab() {
   if (!tokenData) {
@@ -789,7 +1110,8 @@ function renderTokensTab() {
   return html;
 }
 
-// ==== PART 8.5: modals (phase/stage details) + Escape-to-close listener ====
+;
+
 // PART 8.5: Modals - detalhes de fases e stages
 const PHASE_DETAILS = {
   initialization: {
@@ -933,9 +1255,10 @@ function showStageInfo(ev, slug) {
   `);
 }
 
-// ==== PART 9: module state, intent selection, tab switching ====
-// (rootDirHandle / loadDashboardData / refreshData / auto-refresh polling and
-//  the DOMContentLoaded + visibilitychange init are provided by bridge.js)
+;
+
+// PART 9: Main app logic & event handlers
+let rootDirHandle = null;
 let activeTab = 'workflow';
 let selectedIntentDir = null; // dirName do intent selecionado (persiste entre refreshes)
 
@@ -962,9 +1285,70 @@ function switchTab(tabId) {
   if (btn) { btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
   // O grafo de workflow desenha as arestas SVG só quando visível (precisa de layout)
   if (tabId === 'workflow' && typeof drawWfEdges === 'function') requestAnimationFrame(drawWfEdges);
+  // A aba Arquivos renderiza mermaid depois que o leitor está no DOM
+  if (tabId === 'files' && typeof runMermaid === 'function') requestAnimationFrame(runMermaid);
 }
 
-// toggleAutoRefresh: keeps the pause/resume UX; start/stopAutoRefresh are no-ops in bridge.js
+// --- File browser (aba Arquivos) ---
+// Carrega a árvore sob demanda (FS Access API). A extensão sobrescreve estas
+// funções em bridge.js (pede ao host via postMessage).
+async function loadFileTree() {
+  if (fbLoading || !rootDirHandle) return;
+  fbLoading = true;
+  try {
+    const space = (dashboardData && dashboardData.activeSpace) || 'default';
+    const intent = currentIntent();
+    fbTree = await buildFileTree(rootDirHandle, space, intent ? intent.dirName : '');
+  } catch (e) {
+    console.warn('Falha ao listar árvore de arquivos:', e);
+    fbTree = [];
+  } finally {
+    fbLoading = false;
+    const el = document.getElementById('tab-files');
+    if (el) { el.innerHTML = safeRender(renderFilesTab); if (activeTab === 'files') requestAnimationFrame(runMermaid); }
+  }
+}
+
+async function openAidlcFile(path) {
+  try {
+    if (fbContentCache[path] == null && rootDirHandle) {
+      fbContentCache[path] = await readAidlcFile(rootDirHandle, path);
+    }
+  } catch (e) {
+    fbContentCache[path] = 'Erro ao ler: ' + (e && e.message || e);
+  }
+  fbSelectedPath = path;
+  const el = document.getElementById('tab-files');
+  if (el) { el.innerHTML = safeRender(renderFilesTab); requestAnimationFrame(runMermaid); }
+}
+
+async function refreshData() {
+  if (!rootDirHandle) return;
+  try {
+    dashboardData = await loadDashboardData(rootDirHandle);
+    document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+    switchTab(activeTab); // restore active tab after re-render
+    const indicator = document.getElementById('refresh-indicator');
+    if (indicator) indicator.textContent = t('updatedAt') + ' ' + new Date().toLocaleTimeString(LOCALES[lang] || 'en-US');
+  } catch (err) {
+    console.warn('Falha ao atualizar:', err);
+    // Nunca falhe em silêncio: mostra o aviso no indicador (o timer segue tentando)
+    const indicator = document.getElementById('refresh-indicator');
+    if (indicator) {
+      indicator.textContent = t('updWarn');
+      indicator.title = String(err && err.message || err);
+    }
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  refreshTimer = setInterval(refreshData, REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefresh() {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+}
 
 function toggleAutoRefresh() {
   autoRefreshEnabled = !autoRefreshEnabled;
@@ -976,13 +1360,37 @@ function toggleAutoRefresh() {
   }
 }
 
-// --- token refresh state (timers driven by bridge.js no-ops) ---
+// --- Auto-refresh de tokens/créditos (independente, mais lento) ---
+// Reparsear os .jsonl é caro, então roda num intervalo próprio (não no loop de 5s
 // da pasta aidlc). Só re-renderiza a aba de tokens; funciona mesmo sem a pasta aidlc.
 let tokenAutoRefresh = true;
 let tokenRefreshTimer = null;
 let lastTokenRefresh = null;
+const TOKEN_REFRESH_INTERVAL_MS = 30000;
 
-// toggleTokenAutoRefresh: same UX; startTokenRefresh/stopTokenRefresh are no-ops in bridge.js
+async function refreshTokens() {
+  if (!tokenDirHandle) return;
+  try {
+    await loadTokenData();
+    lastTokenRefresh = new Date();
+    // Só re-renderiza se a aba de tokens estiver visível (evita trabalho invisível)
+    if (activeTab === 'tokens') {
+      const el = document.getElementById('tab-tokens');
+      if (el) el.innerHTML = safeRender(renderTokensTab);
+    }
+  } catch (err) {
+    console.warn('Falha ao atualizar tokens:', err);
+  }
+}
+
+function startTokenRefresh() {
+  stopTokenRefresh();
+  if (tokenAutoRefresh) tokenRefreshTimer = setInterval(refreshTokens, TOKEN_REFRESH_INTERVAL_MS);
+}
+
+function stopTokenRefresh() {
+  if (tokenRefreshTimer) { clearInterval(tokenRefreshTimer); tokenRefreshTimer = null; }
+}
 
 function toggleTokenAutoRefresh() {
   tokenAutoRefresh = !tokenAutoRefresh;
@@ -994,7 +1402,47 @@ function toggleTokenAutoRefresh() {
   }
 }
 
-// ==== PART 10/10b: I18N — Português ====
+async function openFolder() {
+  try {
+    rootDirHandle = await window.showDirectoryPicker({ mode: 'read' });
+    document.getElementById('app').innerHTML = `<div class="empty-state"><p>${t('loading')}</p></div>`;
+    dashboardData = await loadDashboardData(rootDirHandle);
+    document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+    switchTab(activeTab);
+    if (autoRefreshEnabled) startAutoRefresh();
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      alert(t('errRead') + err.message);
+    }
+  }
+}
+
+// Pausa o polling quando a aba do navegador está em background
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { stopAutoRefresh(); stopTokenRefresh(); }
+  else {
+    if (autoRefreshEnabled && rootDirHandle) { refreshData(); startAutoRefresh(); }
+    if (tokenAutoRefresh && tokenDirHandle) { refreshTokens(); startTokenRefresh(); }
+  }
+});
+
+// Render inicial adiado para depois de todos os scripts (dicionários I18N incluídos)
+window.addEventListener('DOMContentLoaded', () => {
+  if (!window.showDirectoryPicker) {
+    document.getElementById('app').innerHTML = `
+      <div class="load-area">
+        <div class="header-logo">⚠️</div>
+        <h1>${t('unsupportedTitle')}</h1>
+        <p class="load-desc">${t('unsupportedDesc')}</p>
+      </div>
+    `;
+    return;
+  }
+  document.getElementById('app').innerHTML = renderLoadScreen();
+});
+
+;
+
 // PART 10: I18N - Português
 Object.assign(I18N.pt = I18N.pt || {}, {
   loadDesc:'Selecione a pasta <code>aidlc/</code> do seu projeto para visualizar o estado do workflow, progresso das fases e decisões.',
@@ -1010,6 +1458,7 @@ Object.assign(I18N.pt = I18N.pt || {}, {
   updWarn:'⚠️ Falha ao atualizar — tentando de novo em 5s',
   tabPhases:'Fases', tabStages:'Stages', tabSensors:'Sensores', tabKnowledge:'Conhecimento', tabAudit:'Auditoria', tabTokens:'Tokens', tabHelp:'Ajuda',
   tabWorkflow:'Workflow',
+  tabFiles:'Arquivos', fbEmpty:'Nenhum arquivo legível nesta pasta.', fbPick:'Selecione um arquivo à esquerda para ler.',
   wfTitle:'🗺️ Formato do workflow por scope',
   wfSub:'Mostra quais das 33 stages rodam de acordo com o scope. As esmaecidas são puladas (o doctor ainda as valida, só não executam).',
   wfRealScope:'Scope real deste workflow', wfIsReal:'Este é o scope em execução:', wfNotReal:'Prévia — o scope real é "{real}".',
@@ -1033,7 +1482,7 @@ Object.assign(I18N.pt = I18N.pt || {}, {
   kDecRules:'Decisões e Regras Aprendidas', kDecisions:'Decisões', kForbidden:'Proibições (NEVER)', kNever:'NUNCA',
   kMandated:'Obrigatórios (ALWAYS)', kAlways:'SEMPRE', kLearnCaptured:'Aprendizados Capturados',
   kLearnLine:'{total} aprendizado(s) — {o} do orquestrador, {u} do usuário',
-  aTitle:'Trail de Auditoria', aNone:'Sem logs de auditoria',
+  aTitle:'Trail de Auditoria', aNone:'Sem logs de auditoria', aDecisions:'Decisões Registradas',
   evSESSION_STARTED:'🚀 Sessão Iniciada', evHUMAN_TURN:'👤 Turno Humano', evDECISION_RECORDED:'📝 Decisão Registrada',
   evSUBAGENT_COMPLETED:'🤖 Subagente Concluiu', evHEALTH_CHECKED:'🩺 Health Check', evERROR_LOGGED:'⚠️ Erro',
   evGUARDRAIL_LOADED:'🛡️ Guardrail Carregado', evSTAGE_STARTED:'▶️ Stage Iniciou', evSTAGE_COMPLETED:'✅ Stage Concluiu',
@@ -1057,6 +1506,23 @@ Object.assign(I18N.pt = I18N.pt || {}, {
   tkKiroCreditCard:'Créditos por Stage (Kiro)',
   tkKiroCreditNote:'Créditos consumidos por turno, atribuídos ao stage cuja janela de execução contém o timestamp do turno. Mesma unidade de cobrança da sua assinatura Kiro.'
 });
+
+// Units & Bolts (23-units-bolts.js)
+Object.assign(I18N.pt, {
+  ubFullTitle:'Construction — Units & Bolts', ubPlanTitle:'Plano de Construction', ubHistTitle:'Construction concluída',
+  ubPlanSum:'{u} units geradas · {b} bolts planejados', ubHistSum:'{d}/{u} units concluídas · {b} bolts',
+  ubPreviewNote:'Plano gerado na Inception — a execução por unit começa na fase Construction.',
+  ubUnits:'Units', ubBoltsPlanned:'Bolts planejados', ubBoltsNoPlan:'Bolts (sem bolt-plan)',
+  ubDone:'Executados', ubRunning:'Em execução', ubQueued:'Na fila', ubFailed:'Falharam',
+  ubSt_done:'concluído', ubSt_running:'em execução', ubSt_queued:'na fila', ubSt_failed:'falhou', ubSt_pending:'pendente',
+  ubSt_skipped:'pulado', ubSt_active:'em execução', ubSt_awaiting:'aguardando aprovação', ubSt_revising:'em revisão',
+  ubDependsOn:'depende de', ubNoDeps:'sem dependências', ubWalking:'Walking skeleton',
+  ubBoltTrack:'Trilha de Bolts', ubUnitsGrid:'Units — progresso por stage (3.1 → 3.5)',
+  ubShowGrid:'Mostrar grade de stages', ubShowUnits:'Ver units e bolts', ubSource:'Lido de'
+});
+
+;
+
 // PART 10b: I18N - Português (Ajuda)
 Object.assign(I18N.pt = I18N.pt || {}, {
   hTitle:'O que é o AI-DLC?',
@@ -1073,7 +1539,8 @@ Object.assign(I18N.pt = I18N.pt || {}, {
   hCmd1:'Verifica saúde do setup', hCmd2:'Inicia um workflow', hCmd3:'Mostra status atual', hCmd4:'Pula para um stage', hCmd5:'Compõe plano adaptativo'
 });
 
-// ==== PART 11/11b: I18N — English ====
+;
+
 // PART 11: I18N - English (fallback base)
 Object.assign(I18N.en = I18N.en || {}, {
   loadDesc:'Select your project\'s <code>aidlc/</code> folder to view workflow state, phase progress and decisions.',
@@ -1089,6 +1556,7 @@ Object.assign(I18N.en = I18N.en || {}, {
   updWarn:'⚠️ Refresh failed — retrying in 5s',
   tabPhases:'Phases', tabStages:'Stages', tabSensors:'Sensors', tabKnowledge:'Knowledge', tabAudit:'Audit', tabTokens:'Tokens', tabHelp:'Help',
   tabWorkflow:'Workflow',
+  tabFiles:'Files', fbEmpty:'No readable files in this folder.', fbPick:'Select a file on the left to read it.',
   wfTitle:'🗺️ Workflow shape per scope',
   wfSub:'Shows which of the 33 stages run for each scope. Dimmed ones are skipped (the doctor still validates them, they just do not execute).',
   wfRealScope:'This workflow\'s actual scope', wfIsReal:'This is the running scope:', wfNotReal:'Preview — the actual scope is "{real}".',
@@ -1112,7 +1580,7 @@ Object.assign(I18N.en = I18N.en || {}, {
   kDecRules:'Learned Decisions and Rules', kDecisions:'Decisions', kForbidden:'Forbidden (NEVER)', kNever:'NEVER',
   kMandated:'Mandated (ALWAYS)', kAlways:'ALWAYS', kLearnCaptured:'Captured Learnings',
   kLearnLine:'{total} learning(s) — {o} from orchestrator, {u} from user',
-  aTitle:'Audit Trail', aNone:'No audit logs',
+  aTitle:'Audit Trail', aNone:'No audit logs', aDecisions:'Recorded Decisions',
   evSESSION_STARTED:'🚀 Session Started', evHUMAN_TURN:'👤 Human Turn', evDECISION_RECORDED:'📝 Decision Recorded',
   evSUBAGENT_COMPLETED:'🤖 Subagent Completed', evHEALTH_CHECKED:'🩺 Health Check', evERROR_LOGGED:'⚠️ Error',
   evGUARDRAIL_LOADED:'🛡️ Guardrail Loaded', evSTAGE_STARTED:'▶️ Stage Started', evSTAGE_COMPLETED:'✅ Stage Completed',
@@ -1136,6 +1604,23 @@ Object.assign(I18N.en = I18N.en || {}, {
   tkKiroCreditCard:'Credits per Stage (Kiro)',
   tkKiroCreditNote:'Credits consumed per turn, attributed to the stage whose execution window contains the turn timestamp. Same billing unit as your Kiro subscription.'
 });
+
+// Units & Bolts (23-units-bolts.js)
+Object.assign(I18N.en, {
+  ubFullTitle:'Construction — Units & Bolts', ubPlanTitle:'Construction plan', ubHistTitle:'Construction complete',
+  ubPlanSum:'{u} units generated · {b} bolts planned', ubHistSum:'{d}/{u} units done · {b} bolts',
+  ubPreviewNote:'Plan generated in Inception — per-unit execution starts in the Construction phase.',
+  ubUnits:'Units', ubBoltsPlanned:'Bolts planned', ubBoltsNoPlan:'Bolts (no bolt-plan)',
+  ubDone:'Done', ubRunning:'Running', ubQueued:'Queued', ubFailed:'Failed',
+  ubSt_done:'done', ubSt_running:'running', ubSt_queued:'queued', ubSt_failed:'failed', ubSt_pending:'pending',
+  ubSt_skipped:'skipped', ubSt_active:'running', ubSt_awaiting:'awaiting approval', ubSt_revising:'revising',
+  ubDependsOn:'depends on', ubNoDeps:'no dependencies', ubWalking:'Walking skeleton',
+  ubBoltTrack:'Bolt track', ubUnitsGrid:'Units — progress per stage (3.1 → 3.5)',
+  ubShowGrid:'Show stage grid', ubShowUnits:'Show units and bolts', ubSource:'Read from'
+});
+
+;
+
 // PART 11b: I18N - English (Help)
 Object.assign(I18N.en = I18N.en || {}, {
   hTitle:'What is AI-DLC?',
@@ -1152,7 +1637,8 @@ Object.assign(I18N.en = I18N.en || {}, {
   hCmd1:'Checks setup health', hCmd2:'Starts a workflow', hCmd3:'Shows current status', hCmd4:'Jumps to a stage', hCmd5:'Composes an adaptive plan'
 });
 
-// ==== PART 12/12b: I18N — Español ====
+;
+
 // PART 12: I18N - Español
 Object.assign(I18N.es = I18N.es || {}, {
   loadDesc:'Selecciona la carpeta <code>aidlc/</code> de tu proyecto para ver el estado del workflow, el progreso de las fases y las decisiones.',
@@ -1168,6 +1654,7 @@ Object.assign(I18N.es = I18N.es || {}, {
   updWarn:'⚠️ Error al actualizar — reintentando en 5s',
   tabPhases:'Fases', tabStages:'Stages', tabSensors:'Sensores', tabKnowledge:'Conocimiento', tabAudit:'Auditoría', tabTokens:'Tokens', tabHelp:'Ayuda',
   tabWorkflow:'Workflow',
+  tabFiles:'Archivos', fbEmpty:'Ningún archivo legible en esta carpeta.', fbPick:'Selecciona un archivo a la izquierda para leerlo.',
   wfTitle:'🗺️ Formato del workflow por scope',
   wfSub:'Muestra cuáles de las 33 stages corren según el scope. Las atenuadas se omiten (el doctor aún las valida, solo no se ejecutan).',
   wfRealScope:'Scope real de este workflow', wfIsReal:'Este es el scope en ejecución:', wfNotReal:'Vista previa — el scope real es "{real}".',
@@ -1191,7 +1678,7 @@ Object.assign(I18N.es = I18N.es || {}, {
   kDecRules:'Decisiones y Reglas Aprendidas', kDecisions:'Decisiones', kForbidden:'Prohibiciones (NEVER)', kNever:'NUNCA',
   kMandated:'Obligatorios (ALWAYS)', kAlways:'SIEMPRE', kLearnCaptured:'Aprendizajes Capturados',
   kLearnLine:'{total} aprendizaje(s) — {o} del orquestador, {u} del usuario',
-  aTitle:'Registro de Auditoría', aNone:'Sin logs de auditoría',
+  aTitle:'Registro de Auditoría', aNone:'Sin logs de auditoría', aDecisions:'Decisiones Registradas',
   evSESSION_STARTED:'🚀 Sesión Iniciada', evHUMAN_TURN:'👤 Turno Humano', evDECISION_RECORDED:'📝 Decisión Registrada',
   evSUBAGENT_COMPLETED:'🤖 Subagente Completó', evHEALTH_CHECKED:'🩺 Health Check', evERROR_LOGGED:'⚠️ Error',
   evGUARDRAIL_LOADED:'🛡️ Guardrail Cargado', evSTAGE_STARTED:'▶️ Stage Inició', evSTAGE_COMPLETED:'✅ Stage Completó',
@@ -1215,6 +1702,23 @@ Object.assign(I18N.es = I18N.es || {}, {
   tkKiroCreditCard:'Créditos por Stage (Kiro)',
   tkKiroCreditNote:'Créditos consumidos por turno, atribuidos al stage cuya ventana de ejecución contiene el timestamp del turno. Misma unidad de facturación de tu suscripción Kiro.'
 });
+
+// Units & Bolts (23-units-bolts.js)
+Object.assign(I18N.es, {
+  ubFullTitle:'Construction — Units & Bolts', ubPlanTitle:'Plan de Construction', ubHistTitle:'Construction concluida',
+  ubPlanSum:'{u} units generadas · {b} bolts planificados', ubHistSum:'{d}/{u} units concluidas · {b} bolts',
+  ubPreviewNote:'Plan generado en Inception — la ejecución por unit empieza en la fase Construction.',
+  ubUnits:'Units', ubBoltsPlanned:'Bolts planificados', ubBoltsNoPlan:'Bolts (sin bolt-plan)',
+  ubDone:'Ejecutados', ubRunning:'En ejecución', ubQueued:'En cola', ubFailed:'Fallaron',
+  ubSt_done:'concluido', ubSt_running:'en ejecución', ubSt_queued:'en cola', ubSt_failed:'falló', ubSt_pending:'pendiente',
+  ubSt_skipped:'omitido', ubSt_active:'en ejecución', ubSt_awaiting:'esperando aprobación', ubSt_revising:'en revisión',
+  ubDependsOn:'depende de', ubNoDeps:'sin dependencias', ubWalking:'Walking skeleton',
+  ubBoltTrack:'Secuencia de Bolts', ubUnitsGrid:'Units — progreso por stage (3.1 → 3.5)',
+  ubShowGrid:'Mostrar grilla de stages', ubShowUnits:'Ver units y bolts', ubSource:'Leído de'
+});
+
+;
+
 // PART 12b: I18N - Español (Ayuda)
 Object.assign(I18N.es = I18N.es || {}, {
   hTitle:'¿Qué es AI-DLC?',
@@ -1231,7 +1735,8 @@ Object.assign(I18N.es = I18N.es || {}, {
   hCmd1:'Verifica la salud del setup', hCmd2:'Inicia un workflow', hCmd3:'Muestra el estado actual', hCmd4:'Salta a un stage', hCmd5:'Compone un plan adaptativo'
 });
 
-// ==== PART 13: Stage descriptions — English ====
+;
+
 // PART 13: Stage descriptions - English
 const STAGE_DESC_EN = {
   'workspace-scaffold':'Creates the AIDLC folder structure in the workspace',
@@ -1269,7 +1774,8 @@ const STAGE_DESC_EN = {
   'feedback-optimization':'Collects feedback and optimizes'
 };
 
-// ==== PART 14: Stage descriptions — Español ====
+;
+
 // PART 14: Stage descriptions - Español
 const STAGE_DESC_ES = {
   'workspace-scaffold':'Crea la estructura de carpetas de AIDLC en el workspace',
@@ -1307,7 +1813,8 @@ const STAGE_DESC_ES = {
   'feedback-optimization':'Recoge feedback y optimiza'
 };
 
-// ==== PART 21: Workflow-shape graph ====
+;
+
 // PART 21: Workflow-shape graph — mostra o formato do workflow do scope
 // que está rodando (não fixo). Fonte: matriz stage-by-scope do AI-DLC 2.0 GA
 // (docs/guide/05-scopes-and-depth.md). 5 colunas × 33 stages.
@@ -1351,7 +1858,7 @@ const SCOPE_META = {
   refactor:        { desc:'Reestrutura código existente sem mudar comportamento' },
   infra:           { desc:'Mudança de infra: arquitetura, IaC, provisioning e observability' },
   'security-patch':{ desc:'Resposta a CVE: caminho rápido pelas stages de segurança' },
-  classic:         { desc:'Lifecycle estilo v1, sem a cerimônia de Ideation' },
+  classic:         { desc:'Estilo v1: Inception + Construction (sem Ideation, CI Pipeline e Operation)' },
   workshop:        { desc:'Sessão facilitada/treinamento com o lifecycle completo pós-Ideation' },
   express:         { desc:'O caminho mais leve: requisitos → código → deploy condicional, sem design' }
 };
@@ -1367,7 +1874,7 @@ const SCOPE_EXEC = {
   refactor: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','requirements-analysis','functional-design','code-generation','build-and-test','deployment-pipeline','deployment-execution'],
   infra: ['workspace-scaffold','workspace-detection','state-init','practices-discovery','requirements-analysis','nfr-requirements','nfr-design','infrastructure-design','ci-pipeline','deployment-pipeline','environment-provisioning','deployment-execution','observability-setup'],
   'security-patch': ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','requirements-analysis','nfr-requirements','code-generation','build-and-test','deployment-pipeline','deployment-execution'],
-  classic: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','practices-discovery','requirements-analysis','user-stories','refined-mockups','domain-design','units-generation','contract-design','delivery-planning','functional-design','nfr-requirements','nfr-design','infrastructure-design','code-generation','build-and-test','ci-pipeline','deployment-pipeline','environment-provisioning','deployment-execution','observability-setup','incident-response','performance-validation','feedback-optimization'],
+  classic: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','practices-discovery','requirements-analysis','user-stories','refined-mockups','domain-design','units-generation','contract-design','delivery-planning','functional-design','nfr-requirements','nfr-design','infrastructure-design','code-generation','build-and-test'],
   workshop: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','practices-discovery','requirements-analysis','user-stories','refined-mockups','domain-design','units-generation','contract-design','delivery-planning','functional-design','nfr-requirements','nfr-design','infrastructure-design','code-generation','build-and-test','ci-pipeline','deployment-pipeline','environment-provisioning','deployment-execution','observability-setup','incident-response','performance-validation','feedback-optimization'],
   express: ['workspace-scaffold','workspace-detection','state-init','reverse-engineering','requirements-analysis','code-generation','build-and-test','deployment-pipeline','deployment-execution','observability-setup']
 };
@@ -1532,7 +2039,7 @@ function renderWorkflowTab(state) {
   const srcLine = (typeof dashboardData !== 'undefined' && dashboardData && dashboardData.scopeGridSource)
     ? `<div class="wf-src">${tf('wfGridSrc', { src: esc(dashboardData.scopeGridSource) })}</div>` : '';
 
-  return `
+  const gridHtml = `
     <div class="wf-head">
       <h3 class="wf-title">${t('wfTitle')}</h3>
       <p class="wf-sub">${t('wfSub')}</p>
@@ -1554,6 +2061,22 @@ function renderWorkflowTab(state) {
       <span>◈ ${t('wfVGateLeg')}</span>
     </div>
   `;
+
+  // Painel Units & Bolts (23-units-bolts.js). Gatilho = existem units, não a fase:
+  // preview/history ficam acima da grade; durante Construction a grade recolhe.
+  const intent = typeof currentIntent === 'function' ? currentIntent() : null;
+  let ubModel = null, ubHtml = '';
+  if (intent && typeof buildUnitsModel === 'function') {
+    try { ubModel = buildUnitsModel(intent, state); ubHtml = renderUnitsPanel(intent, state, ubModel); }
+    catch (e) { console.warn('painel units/bolts:', e); ubModel = null; ubHtml = ''; }
+  }
+  if (ubModel && ubModel.mode === 'full') {
+    return `${ubHtml}
+      <details class="ub-grid-toggle"${ubGridOpen ? ' open' : ''} ontoggle="toggleUbGrid(this)">
+        <summary>${t('ubShowGrid')}</summary>${gridHtml}
+      </details>`;
+  }
+  return ubHtml + gridHtml;
 }
 
 function setWfScope(scope) {
@@ -1605,4 +2128,466 @@ function drawWfEdges() {
 }
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('resize', () => requestAnimationFrame(drawWfEdges));
+}
+
+;
+
+// PART 22: File browser (aba Arquivos) — navega a pasta aidlc/ do intent e lê
+// artefatos .md/.json. Markdown vira HTML por um mini-parser próprio (seguro, via
+// esc()); blocos ```mermaid são renderizados pela lib mermaid (CDN no HTML
+// single-file; empacotada em media/ na extensão).
+
+let fbTree = null;          // árvore carregada (cache por render da aba)
+let fbSelectedPath = null;  // arquivo aberto no leitor
+let fbContentCache = {};    // path -> conteúdo lido (evita reler ao re-renderizar)
+let fbLoading = false;
+let fbMermaidSeq = 0;       // ids únicos por diagrama
+
+// ---- Mini Markdown -> HTML (seguro) ----
+// Escapa TUDO com esc() primeiro; só então reintroduz a marcação reconhecida.
+// Blocos de código e mermaid são extraídos antes (placeholders) pra não terem
+// a marcação inline aplicada dentro deles.
+function mdInline(s) {
+  // s já vem escapado. Aplica bold, italic, code inline e links seguros.
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
+  // links [txt](url) — só http(s), mailto, relativo/âncora; resto vira texto
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, txt, url) => {
+    const u = url.trim();
+    const safe = /^(https?:\/\/|mailto:|#|\/|\.\/|\.\.\/)/i.test(u);
+    return safe ? `<a href="${u}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">${txt}</a>` : esc(`[${txt}](${url})`);
+  });
+  return s;
+}
+
+function renderMarkdown(md) {
+  const raw = String(md || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const blocks = [];
+  // 1) extrai fences ```lang ... ``` como placeholders (mermaid vira <div class=mermaid>)
+  let text = raw.replace(/```(\w*)\n([\s\S]*?)```/g, (m, lang, body) => {
+    const idx = blocks.length;
+    if ((lang || '').toLowerCase() === 'mermaid') {
+      const id = 'fb-mmd-' + (fbMermaidSeq++);
+      blocks.push(`<div class="fb-mermaid mermaid" id="${id}">${esc(body.trim())}</div>`);
+    } else {
+      blocks.push(`<pre class="fb-code"><code>${esc(body)}</code></pre>`);
+    }
+    return `\u0000BLOCK${idx}\u0000`;
+  });
+  // 2) escapa o resto
+  text = esc(text);
+  // 3) parse linha a linha (headings, listas, tabelas simples, hr, parágrafos)
+  const lines = text.split('\n');
+  let html = '', inUl = false, inOl = false, para = [];
+  const flushPara = () => { if (para.length) { html += `<p>${mdInline(para.join(' '))}</p>`; para = []; } };
+  const flushLists = () => { if (inUl) { html += '</ul>'; inUl = false; } if (inOl) { html += '</ol>'; inOl = false; } };
+  for (const ln of lines) {
+    const line = ln.replace(/\s+$/, '');
+    const ph = line.match(/^\u0000BLOCK(\d+)\u0000$/);
+    if (ph) { flushPara(); flushLists(); html += blocks[+ph[1]]; continue; }
+    if (!line.trim()) { flushPara(); flushLists(); continue; }
+    let m;
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flushPara(); flushLists(); const lv = m[1].length; html += `<h${lv} class="fb-h">${mdInline(m[2])}</h${lv}>`; continue; }
+    if (/^(---|\*\*\*|___)\s*$/.test(line)) { flushPara(); flushLists(); html += '<hr class="fb-hr">'; continue; }
+    if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) { flushPara(); if (inOl) { html += '</ol>'; inOl = false; } if (!inUl) { html += '<ul class="fb-ul">'; inUl = true; } html += `<li>${mdInline(m[1])}</li>`; continue; }
+    if ((m = line.match(/^\s*\d+\.\s+(.*)$/))) { flushPara(); if (inUl) { html += '</ul>'; inUl = false; } if (!inOl) { html += '<ol class="fb-ol">'; inOl = true; } html += `<li>${mdInline(m[1])}</li>`; continue; }
+    para.push(line.trim());
+  }
+  flushPara(); flushLists();
+  return html;
+}
+
+function renderJsonPretty(txt) {
+  let obj;
+  try { obj = JSON.parse(txt); } catch { return `<pre class="fb-code"><code>${esc(txt)}</code></pre>`; }
+  return `<pre class="fb-code"><code>${esc(JSON.stringify(obj, null, 2))}</code></pre>`;
+}
+
+function renderFileContent(path, txt) {
+  const lower = path.toLowerCase();
+  if (lower.endsWith('.json')) return renderJsonPretty(txt);
+  if (lower.endsWith('.md')) return `<div class="fb-md">${renderMarkdown(txt)}</div>`;
+  return `<pre class="fb-code"><code>${esc(txt)}</code></pre>`;
+}
+
+// ---- Árvore ----
+function renderTreeNodes(nodes) {
+  let html = '<ul class="fb-tree">';
+  for (const n of nodes) {
+    if (n.kind === 'dir') {
+      html += `<li class="fb-dir"><details open><summary>📁 ${esc(n.name)}</summary>${renderTreeNodes(n.children || [])}</details></li>`;
+    } else {
+      const sel = n.path === fbSelectedPath ? ' selected' : '';
+      const icon = n.name.toLowerCase().endsWith('.json') ? '{ }' : n.name.toLowerCase().endsWith('.md') ? '📄' : '📃';
+      html += `<li class="fb-file${sel}" onclick="openAidlcFile('${esc(n.path)}')" title="${esc(n.path)}">${icon} ${esc(n.name)}</li>`;
+    }
+  }
+  return html + '</ul>';
+}
+
+function renderFilesTab() {
+  if (fbLoading) return `<div class="empty-state">${t('loading')}</div>`;
+  if (!fbTree) {
+    // dispara o carregamento lazy e mostra placeholder; loadFileTree re-renderiza
+    loadFileTree();
+    return `<div class="empty-state">${t('loading')}</div>`;
+  }
+  if (!fbTree.length) return `<div class="empty-state">${t('fbEmpty')}</div>`;
+  const viewer = fbSelectedPath && fbContentCache[fbSelectedPath] != null
+    ? `<div class="fb-viewer-head">${esc(fbSelectedPath)}</div><div class="fb-viewer-body">${safeRenderFile(fbSelectedPath)}</div>`
+    : `<div class="fb-viewer-empty">${t('fbPick')}</div>`;
+  return `
+    <div class="fb-layout">
+      <div class="fb-sidebar">${renderTreeNodes(fbTree)}</div>
+      <div class="fb-viewer">${viewer}</div>
+    </div>`;
+}
+
+function safeRenderFile(path) {
+  try { return renderFileContent(path, fbContentCache[path]); }
+  catch (e) { return `<div class="empty-state">⚠️ ${esc(e.message)}</div>`; }
+}
+
+// Renderiza os diagramas mermaid presentes no leitor (chamado após pintar o HTML).
+function runMermaid() {
+  try {
+    if (typeof mermaid === 'undefined') return;
+    if (!runMermaid._init) {
+      mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+      runMermaid._init = true;
+    }
+    const nodes = document.querySelectorAll('.fb-mermaid:not([data-processed])');
+    if (nodes.length) mermaid.run({ nodes }).catch(() => {});
+  } catch {}
+}
+
+;
+
+// PART 23: Units & Bolts — dimensão de execução da Construction.
+// Fontes (todas opcionais; nada aqui pode derrubar a aba Workflow):
+//   inception/units-generation/unit-of-work-dependency.md → DAG (bloco ```yaml units:)
+//   inception/units-generation/unit-of-work.md            → descrição por unit
+//   inception/delivery-planning/bolt-plan.md              → sequência de Bolts
+//   aidlc-state.md  (### CONSTRUCTION PHASE / "Per unit: X") → progresso por unit
+//   audit/*.md      (BOLT_STARTED / BOLT_COMPLETED / BOLT_FAILED) → estado runtime
+//
+// Gatilho em 3 estados (não amarrado à fase): existem units?
+//   none    → sem units (ex.: intent classic sem decomposição) — grade normal
+//   preview → units geradas, Construction ainda não começou — card compacto + grade
+//   full    → Construction ativa — painel cheio; grade recolhida
+//   history → Construction encerrada — resumo read-only + grade
+
+// Stages que rodam POR UNIT (3.1→3.5). build-and-test e ci-pipeline rodam uma vez no fim.
+const UB_UNIT_STAGES = ['functional-design', 'nfr-requirements', 'nfr-design', 'infrastructure-design', 'code-generation'];
+let ubGridOpen = false; // grade recolhida no modo full — sobrevive ao auto-refresh
+
+function ubSlug(s) {
+  return String(s || '').toLowerCase().replace(/[`*_]/g, '').trim().replace(/[^a-z0-9.]+/g, '-').replace(/^-+|-+$/g, '');
+}
+function ubCk(ch) {
+  return ch === 'x' ? 'done' : ch === '-' ? 'active' : ch === '?' ? 'awaiting' : ch === 'R' ? 'revising' : ch === 'S' ? 'skipped' : 'pending';
+}
+function ubRx(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// DAG: bloco yaml obrigatório da stage 2.7 (fonte que o runtime usa pro fan-out).
+function parseUnitsDag(md) {
+  if (!md) return [];
+  const blocks = [...md.matchAll(/```ya?ml[^\n]*\n([\s\S]*?)```/g)].map(m => m[1]);
+  const block = blocks.find(b => /^\s*units\s*:/m.test(b));
+  if (!block) return [];
+  const units = [];
+  let cur = null, inDeps = false;
+  const unq = s => s.trim().replace(/^["']|["']$/g, '');
+  for (const raw of block.split('\n')) {
+    const line = raw.replace(/\s+#.*$/, '');
+    let m;
+    if ((m = line.match(/^\s*-\s*name\s*:\s*(.+?)\s*$/))) {
+      cur = { name: unq(m[1]), kind: '', deps: [] }; units.push(cur); inDeps = false; continue;
+    }
+    if (!cur) continue;
+    if ((m = line.match(/^\s*kind\s*:\s*(.+?)\s*$/))) { cur.kind = unq(m[1]); inDeps = false; continue; }
+    if ((m = line.match(/^\s*depends_on\s*:\s*\[(.*)\]\s*$/))) {
+      cur.deps = m[1].split(',').map(unq).filter(Boolean); inDeps = false; continue;
+    }
+    if (/^\s*depends_on\s*:\s*$/.test(line)) { inDeps = true; continue; }
+    if (inDeps && (m = line.match(/^\s*-\s*(.+?)\s*$/))) { cur.deps.push(unq(m[1])); continue; }
+    if (/\S/.test(line)) inDeps = false;
+  }
+  return units.filter(u => u.name);
+}
+
+// unit-of-work.md: seções "## Unit: <nome>" (formato dos fixtures oficiais) + tabela U{n}/diretório.
+function parseUnitOfWork(md) {
+  if (!md) return [];
+  const out = [];
+  const heads = [...md.matchAll(/^#{2,4}\s+(?:Unit\s*(U\d+)?\s*[:—–-]\s*|(U\d+)\s*[:—–-]\s*)(.+?)\s*$/gm)];
+  heads.forEach((h, i) => {
+    const body = md.slice(h.index + h[0].length, i + 1 < heads.length ? heads[i + 1].index : md.length);
+    const descM = body.match(/###\s*Description\s*\n+([^\n#|][^\n]*)/i) || body.match(/\n\s*([^\s#|\-*>][^\n]{10,})/);
+    out.push({ name: h[3].replace(/[`*]/g, '').trim(), id: h[1] || h[2] || '', desc: descM ? descM[1].trim() : '' });
+  });
+  // tabela "| U1 | u1-desc | ..." → id por diretório
+  for (const r of md.matchAll(/^\|\s*`?(U\d+)`?\s*\|\s*`?(u\d+-[\w.-]+)`?\s*\|/gm)) {
+    const dirName = r[2].replace(/^u\d+-/, '');
+    const hit = out.find(u => ubSlug(u.name) === ubSlug(dirName));
+    if (hit) hit.id = hit.id || r[1];
+    else out.push({ name: dirName, id: r[1], desc: '' });
+  }
+  return out;
+}
+
+// bolt-plan.md: "## Bolt 1 — título" (ou tabela "| Bolt 1 | ... |"). Units casadas por nome.
+function parseBoltPlan(md, unitNames) {
+  if (!md) return [];
+  const names = unitNames || [];
+  const unitsIn = text => names.filter(n =>
+    new RegExp('(^|[^a-z0-9-])' + ubRx(n) + '([^a-z0-9-]|$)', 'i').test(text));
+  const walkRx = /walking[\s-]*skeleton\**\s*[:|]\s*\**\s*(yes|true|sim|s[ií]|✓|✅)/i;
+  const bolts = [];
+  const heads = [...md.matchAll(/^#{2,4}\s+.*?\bBolt\s*#?\s*(\d+)\b(.*)$/gim)];
+  heads.forEach((h, i) => {
+    const body = md.slice(h.index + h[0].length, i + 1 < heads.length ? heads[i + 1].index : md.length);
+    const title = h[2].replace(/^[\s:—–\-.)]+/, '').replace(/[*`]/g, '').trim();
+    bolts.push({
+      n: parseInt(h[1], 10), title,
+      units: unitsIn(body + ' ' + h[0]),
+      walking: /walking[\s-]*skeleton/i.test(h[0]) || walkRx.test(body),
+    });
+  });
+  if (!bolts.length) {
+    for (const r of md.matchAll(/^\|\s*\**\s*(?:Bolt\s*)?#?\s*(\d+)\s*\**\s*\|(.*)$/gim)) {
+      bolts.push({ n: parseInt(r[1], 10), title: '', units: unitsIn(r[2]), walking: /walking[\s-]*skeleton/i.test(r[2]) });
+    }
+  }
+  const seen = new Set();
+  return bolts.filter(b => !seen.has(b.n) && seen.add(b.n)).sort((a, b) => a.n - b.n);
+}
+
+// Blocos "Per unit: X" na seção de Construction do aidlc-state.md.
+function parseStatePerUnit(stateMd) {
+  const res = {};
+  if (!stateMd) return res;
+  const sec = stateMd.match(/###\s*CONSTRUCTION PHASE[^\n]*\n([\s\S]*?)(?=\n###?\s|$)/i);
+  if (!sec) return res;
+  let cur = [];
+  for (const line of sec[1].split('\n')) {
+    const pu = line.match(/^\s*Per unit:\s*(.+?)\s*$/i);
+    if (pu) {
+      cur = /^\[?\s*TBD\s*\]?$/i.test(pu[1]) ? [] : pu[1].split(',').map(s => s.trim()).filter(Boolean);
+      cur.forEach(n => { res[n] = res[n] || {}; });
+      continue;
+    }
+    const ck = line.match(/- \[(.)\] (\S+) [—–-] (\w+)/);
+    if (ck && cur.length) {
+      const st = ck[3].toUpperCase() === 'SKIP' ? 'skipped' : ubCk(ck[1]);
+      cur.forEach(n => { res[n][ck[2]] = st; });
+    }
+  }
+  return res;
+}
+
+// Eventos de Bolt do audit → último estado por unit (cronológico).
+function parseBoltEvents(audit) {
+  const byUnit = {};
+  const events = [];
+  for (const f of audit || []) {
+    for (const section of String(f.content || '').split('---')) {
+      const fields = {};
+      for (const m of section.matchAll(/\*\*([\w ]+)\*\*:\s*(.+)/g)) fields[m[1].trim().toLowerCase()] = m[2].trim();
+      if (fields.timestamp && /^BOLT_(STARTED|COMPLETED|FAILED)$/.test(fields.event || '')) events.push(fields);
+    }
+  }
+  events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const split = s => String(s || '').split(',').map(x => x.trim()).filter(Boolean);
+  for (const e of events) {
+    let targets;
+    if (e.event === 'BOLT_FAILED') targets = split(e['bolt slug'] || e['failed bolt']);
+    else targets = e['bolt slug'] ? [e['bolt slug']] : split(e['bolt names']);
+    const status = e.event === 'BOLT_STARTED' ? 'running' : e.event === 'BOLT_COMPLETED' ? 'done' : 'failed';
+    for (const n of targets) {
+      const prev = byUnit[n] || {};
+      byUnit[n] = { status, batch: e['batch number'] || prev.batch || '', walking: e['walking skeleton'] === 'true' || prev.walking || false, error: e['error summary'] || '' };
+    }
+  }
+  return byUnit;
+}
+
+function unitsPanelMode(state, units, intent) {
+  if (!units.length) return 'none';
+  const ph = state.phases || {};
+  const cur = (state.currentPhase || '').toLowerCase();
+  const c = (ph.construction || '').toLowerCase();
+  const o = (ph.operation || '').toLowerCase();
+  if (cur === 'operation' || ['verified', 'completed'].includes(c) || ['active', 'verified', 'completed'].includes(o)
+    || (intent && intent.status === 'completed')) return 'history';
+  const conStages = (PHASES.find(p => p.id === 'construction') || { stages: [] }).stages;
+  if (cur === 'construction' || c === 'active' || conStages.some(s => ['active', 'done', 'awaiting', 'revising'].includes(state.stages?.[s]?.status))) return 'full';
+  return 'preview';
+}
+
+// Modelo consolidado: units (DAG manda; unit-of-work e state completam) + bolts + contagens.
+function buildUnitsModel(intent, state) {
+  const dag = parseUnitsDag(intent.unitsDag);
+  const uow = parseUnitOfWork(intent.unitsDoc);
+  const perUnit = parseStatePerUnit(intent.state);
+  const rt = parseBoltEvents(intent.audit);
+
+  const units = [];
+  const find = n => units.find(u => ubSlug(u.name) === ubSlug(n));
+  dag.forEach(d => units.push({ name: d.name, kind: d.kind, deps: d.deps, id: '', desc: '' }));
+  uow.forEach(w => {
+    const hit = find(w.name);
+    if (hit) { hit.id = hit.id || w.id; hit.desc = hit.desc || w.desc; }
+    else if (!dag.length) units.push({ name: w.name, kind: '', deps: [], id: w.id, desc: w.desc });
+  });
+  Object.keys(perUnit).forEach(n => { if (!find(n)) units.push({ name: n, kind: '', deps: [], id: '', desc: '' }); });
+
+  const mode = unitsPanelMode(state, units, intent);
+  const closed = mode === 'history';
+  const activeStage = state.currentStage || '';
+
+  units.forEach(u => {
+    const st = perUnit[u.name] || perUnit[Object.keys(perUnit).find(k => ubSlug(k) === ubSlug(u.name))] || {};
+    const r = rt[u.name] || rt[Object.keys(rt).find(k => ubSlug(k) === ubSlug(u.name))] || null;
+    let pills = UB_UNIT_STAGES.map(s => st[s] || 'pending');
+    const listed = Object.keys(st).length > 0;
+    let status;
+    if (r && r.status === 'failed') status = 'failed';
+    else if ((r && r.status === 'done') || (listed && pills.every(p => p === 'done' || p === 'skipped')) || closed) status = 'done';
+    else if ((r && r.status === 'running') || pills.some(p => p !== 'pending' && p !== 'skipped')) status = 'running';
+    else status = 'queued';
+    if (status === 'done') pills = pills.map(p => (p === 'skipped' ? p : 'done'));
+    u.status = status;
+    u.pills = pills;
+    u.batch = r ? r.batch : '';
+    u.error = r ? r.error : '';
+    u.current = status === 'running' ? (UB_UNIT_STAGES[pills.findIndex(p => p === 'active' || p === 'awaiting' || p === 'revising')] || (UB_UNIT_STAGES.includes(activeStage) ? activeStage : '')) : '';
+  });
+
+  const bolts = parseBoltPlan(intent.boltPlan, units.map(u => u.name));
+  bolts.forEach(b => {
+    const us = b.units.map(n => find(n)).filter(Boolean);
+    if (!us.length) b.status = closed ? 'done' : 'queued';
+    else if (us.some(u => u.status === 'failed')) b.status = 'failed';
+    else if (us.every(u => u.status === 'done')) b.status = 'done';
+    else if (us.some(u => u.status !== 'queued')) b.status = 'running';
+    else b.status = 'queued';
+    us.forEach(u => { if (!u.bolt) u.bolt = b.n; });
+  });
+
+  const count = (arr, s) => arr.filter(x => x.status === s).length;
+  // Sem bolt-plan, a unidade de execução contada é a própria unit (runtime: 1 Bolt por unit)
+  const track = bolts.length ? bolts : units;
+  return {
+    mode, units, bolts,
+    unitsDone: count(units, 'done'),
+    done: count(track, 'done'), running: count(track, 'running'),
+    queued: count(track, 'queued'), failed: count(track, 'failed'),
+    trackIsBolts: bolts.length > 0,
+  };
+}
+
+// ---- Render ----
+const UB_COLOR = { done: 'var(--green)', running: 'var(--yellow)', failed: 'var(--red)', queued: 'var(--border)', pending: 'var(--border)', skipped: 'var(--surface2)', active: 'var(--yellow)', awaiting: 'var(--blue)', revising: 'var(--purple)' };
+
+function ubStat(value, label, color) {
+  return `<div class="ub-stat"><div class="ub-stat-v"${color ? ` style="color:${color}"` : ''}>${value}</div><div class="ub-stat-l">${label}</div></div>`;
+}
+function ubSegBar(items) {
+  if (!items.length) return '';
+  return `<div class="ub-seg" role="img" aria-label="${esc(items.map(i => i.status).join(', '))}">${items.map(i =>
+    `<span style="background:${UB_COLOR[i.status] || UB_COLOR.queued}" title="${esc((i.n ? 'Bolt ' + i.n : i.name) + ' · ' + t('ubSt_' + i.status))}"></span>`).join('')}</div>`;
+}
+function ubBadge(status, text) {
+  return `<span class="ub-badge ub-${status}">${esc(text)}</span>`;
+}
+function ubStatusIcon(s) { return s === 'done' ? '✓' : s === 'running' ? '⏳' : s === 'failed' ? '✗' : '○'; }
+
+function renderUnitCard(u, m) {
+  const label = u.status === 'queued' ? t('ubSt_queued') : `${ubStatusIcon(u.status)} ${u.bolt ? 'bolt ' + u.bolt : t('ubSt_' + u.status)}`;
+  const deps = u.deps.length ? `${t('ubDependsOn')}: ${u.deps.map(esc).join(', ')}` : t('ubNoDeps');
+  const meta = [u.id, u.kind].filter(Boolean).map(esc).join(' · ');
+  const pills = u.pills.map((p, i) =>
+    `<span class="ub-pill" style="background:${UB_COLOR[p] || UB_COLOR.pending}" title="${esc((WF_STAGE_LABEL[UB_UNIT_STAGES[i]] || UB_UNIT_STAGES[i]) + ' · ' + t('ubSt_' + p))}"></span>`).join('');
+  let foot = '';
+  if (u.current) foot = `<div class="ub-unit-foot" style="color:var(--yellow)">● ${esc(WF_STAGE_LABEL[u.current] || u.current)}</div>`;
+  else if (u.status === 'failed' && u.error) foot = `<div class="ub-unit-foot" style="color:var(--red)">✗ ${esc(u.error)}</div>`;
+  return `<div class="ub-unit ub-unit-${u.status}" title="${esc(u.desc)}">
+    <div class="ub-unit-head"><div class="ub-unit-name">${esc(u.name)}</div>${ubBadge(u.status, label)}</div>
+    <div class="ub-unit-meta">${meta ? meta + ' · ' : ''}${deps}</div>
+    <div class="ub-pills">${pills}</div>${foot}
+  </div>`;
+}
+
+function renderBoltTrack(m) {
+  if (!m.bolts.length) return '';
+  const chips = m.bolts.map(b => `<div class="ub-bolt ub-bolt-${b.status}">
+      <div class="ub-bolt-head"><b>Bolt ${b.n}</b>${b.walking ? ` <span class="ub-ws" title="${t('ubWalking')}">🦴</span>` : ''}<span class="ub-bolt-st">${ubStatusIcon(b.status)}</span></div>
+      ${b.title ? `<div class="ub-bolt-title">${esc(b.title)}</div>` : ''}
+      <div class="ub-bolt-units">${b.units.length ? b.units.map(esc).join(', ') : '—'}</div>
+    </div>`).join('<span class="ub-bolt-arrow" aria-hidden="true">→</span>');
+  return `<div class="ub-sec-title">${t('ubBoltTrack')}</div><div class="ub-track">${chips}</div>`;
+}
+
+function renderUnitsStats(m) {
+  const boltsLbl = m.trackIsBolts ? t('ubBoltsPlanned') : t('ubBoltsNoPlan');
+  return `<div class="ub-stats">
+      ${ubStat(m.units.length, t('ubUnits'))}
+      <div class="ub-sep"></div>
+      ${ubStat(m.trackIsBolts ? m.bolts.length : '—', boltsLbl)}
+      ${ubStat(m.done, t('ubDone'), 'var(--green)')}
+      ${ubStat(m.running, t('ubRunning'), 'var(--yellow)')}
+      ${ubStat(m.queued, t('ubQueued'), 'var(--text-muted)')}
+      ${m.failed ? ubStat(m.failed, t('ubFailed'), 'var(--red)') : ''}
+    </div>`;
+}
+
+function renderUnitsPanel(intent, state, model) {
+  if (!intent) return '';
+  const m = model || buildUnitsModel(intent, state);
+  if (m.mode === 'none') return '';
+  const track = m.trackIsBolts ? m.bolts : m.units;
+  const src = `<div class="ub-src">${t('ubSource')} <code>unit-of-work-dependency.md</code> · <code>unit-of-work.md</code> · <code>bolt-plan.md</code> · <code>aidlc-state.md</code> · audit</div>`;
+
+  if (m.mode === 'preview') {
+    const boltLine = m.bolts.length
+      ? m.bolts.map(b => `<span class="ub-mini"><b>Bolt ${b.n}</b>${b.walking ? ' 🦴' : ''} ${b.units.length ? '· ' + b.units.map(esc).join(', ') : ''}</span>`).join('')
+      : m.units.map(u => `<span class="ub-mini">${esc(u.name)}</span>`).join('');
+    return `<div class="card ub-card ub-preview" data-ub-mode="preview">
+      <div class="ub-head"><div class="ub-title">📦 ${t('ubPlanTitle')}</div>
+        <div class="ub-head-sum">${tf('ubPlanSum', { u: m.units.length, b: m.bolts.length || '—' })}</div></div>
+      <div class="ub-minis">${boltLine}</div>
+      <div class="ub-note">${t('ubPreviewNote')}</div>
+    </div>`;
+  }
+
+  if (m.mode === 'history') {
+    return `<div class="card ub-card ub-history" data-ub-mode="history">
+      <div class="ub-head"><div class="ub-title">✅ ${t('ubHistTitle')}</div>
+        <div class="ub-head-sum">${tf('ubHistSum', { d: m.unitsDone, u: m.units.length, b: m.bolts.length || '—' })}</div></div>
+      ${ubSegBar(track)}
+      <details class="ub-details"><summary>${t('ubShowUnits')}</summary>
+        ${renderBoltTrack(m)}
+        <div class="ub-grid">${m.units.map(u => renderUnitCard(u, m)).join('')}</div>
+      </details>
+    </div>`;
+  }
+
+  // full — Construction em andamento
+  return `<div class="card ub-card ub-full" data-ub-mode="full">
+    <div class="ub-head"><div class="ub-title">🔨 ${t('ubFullTitle')}</div>
+      <div class="ub-head-sum">${esc(intent.slug || '')}</div></div>
+    ${renderUnitsStats(m)}
+    ${ubSegBar(track)}
+    ${renderBoltTrack(m)}
+    <div class="ub-sec-title">${t('ubUnitsGrid')}</div>
+    <div class="ub-grid">${m.units.map(u => renderUnitCard(u, m)).join('')}</div>
+    ${src}
+  </div>`;
+}
+
+function toggleUbGrid(el) {
+  ubGridOpen = !!(el && el.open);
+  if (ubGridOpen && typeof drawWfEdges === 'function') requestAnimationFrame(drawWfEdges);
 }
