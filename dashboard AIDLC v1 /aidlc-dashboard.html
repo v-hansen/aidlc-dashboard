@@ -174,6 +174,23 @@
 
   .reload-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
   .path-chip { font-size: .76rem; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; font-family: ui-monospace, Menlo, monospace; }
+  .auto-wrap { display: flex; align-items: center; gap: 8px; font-size: .78rem; color: var(--muted); user-select: none; }
+  .auto-wrap.disabled { opacity: .45; cursor: not-allowed; }
+  .switch { position: relative; width: 38px; height: 20px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track { position: absolute; inset: 0; background: var(--border); border-radius: 999px; transition: background .18s; cursor: pointer; }
+  .switch .track::before { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform .18s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::before { transform: translateX(18px); }
+  .switch input:disabled + .track { cursor: not-allowed; }
+  .auto-status { font-size: .72rem; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+  .auto-status .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--construction, #35c27a); box-shadow: 0 0 0 0 rgba(53,194,122,.6); }
+  .auto-status.polling .live-dot { animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(53,194,122,.5); } 70% { box-shadow: 0 0 0 6px rgba(53,194,122,0); } 100% { box-shadow: 0 0 0 0 rgba(53,194,122,0); } }
+  @media (prefers-reduced-motion: reduce) { .auto-status.polling .live-dot { animation: none; } }
+  .flash-upd { animation: flashUpd 1.1s ease-out; }
+  @keyframes flashUpd { 0% { background: color-mix(in srgb, var(--accent) 22%, transparent); } 100% { background: transparent; } }
+  @media (prefers-reduced-motion: reduce) { .flash-upd { animation: none; } }
   .foot { text-align: center; color: var(--muted); font-size: .72rem; margin-top: 28px; }
   .hidden { display: none !important; }
 </style>
@@ -216,6 +233,12 @@
     <div class="reload-bar">
       <span class="path-chip" id="rootChip">aidlc-docs/</span>
       <span class="stage-meta" id="scanMeta"></span>
+      <span class="spacer" style="flex:1"></span>
+      <label class="auto-wrap" id="autoWrap" title="Relê a pasta automaticamente e atualiza quando algum .md mudar">
+        <span class="switch"><input type="checkbox" id="autoToggle" checked /><span class="track"></span></span>
+        <span>Auto-refresh</span>
+      </label>
+      <span class="auto-status hidden" id="autoStatus"><span class="live-dot"></span><span id="autoStatusText"></span></span>
     </div>
 
     <nav class="tabs" id="tabs">
@@ -274,6 +297,11 @@
 
   let FILES = [];      // { rel, name, text }
   let STATE = null;    // computed snapshot
+  let lastDirHandle = null;   // FS Access API dir handle (for reload + auto-refresh)
+  let autoTimer = null;       // setInterval id for polling
+  let lastSig = "";           // signature of the last scan (path|size|mtime per .md)
+  let polling = false;        // guard against overlapping polls
+  const AUTO_INTERVAL_MS = 5000;
 
   // ========== Parsing ==========
   const CB_RE = /^[\s>*-]*\[([ xX])\]/;
@@ -303,6 +331,7 @@
 
   // ========== Ingestion ==========
   async function handleDirectoryHandle(dirHandle) {
+    lastDirHandle = dirHandle;
     const out = []; await walkHandle(dirHandle, "", out); finalize(out, dirHandle.name);
   }
   async function walkHandle(dir, prefix, out) {
@@ -310,7 +339,7 @@
       const rel = prefix ? prefix + "/" + name : name;
       if (handle.kind === "directory") await walkHandle(handle, rel, out);
       else if (name.toLowerCase().endsWith(".md")) {
-        try { const f = await handle.getFile(); out.push({ path: rel, name, text: await f.text() }); } catch (e) {}
+        try { const f = await handle.getFile(); out.push({ path: rel, name, text: await f.text(), size: f.size, mtime: f.lastModified }); } catch (e) {}
       }
     }
   }
@@ -449,7 +478,14 @@
     const auditFile = out.find(f => /(^|\/)audit\.md$/i.test(f.rel));
     const auditWindows = auditFile ? parseAuditWindows(auditFile.text) : [];
     STATE = { projName, stateMeta, phases, qItems, auditWindows, rootLabel: stateFile ? "aidlc-docs/" : rootName + "/", count: out.length };
+    lastSig = computeSig(out);
     renderAll();
+  }
+
+  // Lightweight signature of a scan: set of path|size|mtime for every .md.
+  // Used by auto-refresh to decide whether anything actually changed before re-rendering.
+  function computeSig(out) {
+    return out.map(f => `${f.path}|${f.size || 0}|${f.mtime || 0}`).sort().join("\n");
   }
 
   // Build ordered [startTs, endTs) windows from audit.md, each labeled by phase+stage.
@@ -523,6 +559,7 @@
     const qp = $("qPip"); qp.textContent = STATE.qItems.length ? (pendingQ ? pendingQ + " ⬜" : "✓") : "0";
     qp.className = "pip" + (pendingQ ? " warn" : "");
     renderOverview(); renderPhasesTab(); renderQuestionsTab(); renderFilesTab(); renderTokensTab();
+    refreshAutoAvailability();
   }
 
   function overallPct(phases) {
@@ -832,15 +869,80 @@
   $("tabs").addEventListener("click", (e) => { const t = e.target.closest(".tab"); if (t) switchTab(t.dataset.tab); });
 
   // pick / input / drop / reload
-  let lastDirHandle = null;
   async function pickDirectory() {
-    if (window.showDirectoryPicker) { try { const h = await window.showDirectoryPicker(); lastDirHandle = h; await handleDirectoryHandle(h); } catch (e) {} }
+    if (window.showDirectoryPicker) { try { const h = await window.showDirectoryPicker(); await handleDirectoryHandle(h); } catch (e) {} }
     else $("dirInput").click();
   }
   document.querySelectorAll(".pick-btn").forEach(b => b.onclick = pickDirectory);
   $("pickInputBtn").onclick = () => $("dirInput").click();
   $("dirInput").onchange = (e) => { if (e.target.files.length) handleInputFiles(e.target.files); };
   $("reloadBtn").onclick = async () => { if (lastDirHandle) await handleDirectoryHandle(lastDirHandle); else pickDirectory(); };
+
+  // ========== Auto-refresh (polling) ==========
+  // Only works with the File System Access API (a live dir handle). The webkitdirectory
+  // fallback hands us a one-shot FileList with no way to re-read without the user acting,
+  // so the toggle is disabled there with an explanatory tooltip.
+  function setAutoStatus(text, isPolling) {
+    const el = $("autoStatus"); if (!el) return;
+    el.classList.remove("hidden");
+    el.classList.toggle("polling", !!isPolling);
+    $("autoStatusText").textContent = text;
+  }
+  function stopAuto() {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    $("autoStatus").classList.add("hidden");
+  }
+  async function pollOnce() {
+    if (polling || !lastDirHandle) return;
+    polling = true;
+    try {
+      // Re-check permission; it can be revoked, and querying keeps the grant warm.
+      if (lastDirHandle.queryPermission) {
+        let st = await lastDirHandle.queryPermission({ mode: "read" });
+        if (st === "prompt" && lastDirHandle.requestPermission) st = await lastDirHandle.requestPermission({ mode: "read" });
+        if (st !== "granted") { setAutoStatus("permissão negada — reative pelo botão", false); return; }
+      }
+      const out = []; await walkHandle(lastDirHandle, "", out);
+      const sig = computeSig(out);
+      if (sig !== lastSig) {
+        finalize(out, lastDirHandle.name);   // finalize() resets lastSig + re-renders
+        flashUpdated();
+        setAutoStatus("atualizado " + nowHHMM(), true);
+      } else {
+        setAutoStatus("verificado " + nowHHMM() + " · sem mudanças", true);
+      }
+    } catch (e) {
+      setAutoStatus("erro ao reler: " + (e.message || e.name), false);
+    } finally { polling = false; }
+  }
+  function startAuto() {
+    if (!lastDirHandle) return;
+    stopAuto();
+    setAutoStatus("monitorando a cada " + (AUTO_INTERVAL_MS/1000) + "s…", true);
+    pollOnce();
+    autoTimer = setInterval(pollOnce, AUTO_INTERVAL_MS);
+  }
+  function nowHHMM() { const d = new Date(); return d.toTimeString().slice(0, 8); }
+  function flashUpdated() {
+    const chip = $("scanMeta"); if (!chip) return;
+    chip.classList.remove("flash-upd"); void chip.offsetWidth; chip.classList.add("flash-upd");
+  }
+  function refreshAutoAvailability() {
+    const wrap = $("autoWrap"), tog = $("autoToggle");
+    const supported = !!(window.showDirectoryPicker && lastDirHandle);
+    tog.disabled = !supported;
+    wrap.classList.toggle("disabled", !supported);
+    if (!supported) {
+      stopAuto();
+      wrap.title = window.showDirectoryPicker
+        ? "Ligado por padrão — escolha a pasta pelo botão 'Escolher pasta' (não pelo input) para o auto-refresh começar a monitorar"
+        : "Seu navegador não suporta releitura automática (use Chrome/Edge/Opera e o botão 'Escolher pasta')";
+    } else {
+      wrap.title = "Relê a pasta automaticamente e atualiza quando algum .md mudar";
+      if (tog.checked) startAuto();
+    }
+  }
+  $("autoToggle").onchange = (e) => { if (e.target.checked) startAuto(); else { stopAuto(); setAutoStatus("pausado", false); } };
 
   const dz = $("dropzone");
   ["dragenter","dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("drag"); }));
