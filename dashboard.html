@@ -516,6 +516,51 @@ button:focus-visible, [tabindex]:focus-visible {
 .ub-details > summary, .ub-grid-toggle > summary { cursor: pointer; font-size: 0.8rem; color: var(--accent); margin-top: 10px; }
 .ub-grid-toggle { margin-bottom: 8px; }
 .ub-grid-toggle[open] > summary { margin-bottom: 12px; }
+
+
+/* ── Especialistas (Team Knowledge / Tier 2) ───────────────────────────── */
+.kb-top { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.kb-top .kb-space { color:var(--accent); }
+.kb-muted { color:var(--text-muted); font-size:0.8rem; }
+.kb-path { font-family:ui-monospace,monospace; }
+.kb-status { padding:8px 12px; border-radius:var(--radius); margin-bottom:10px; font-size:0.85rem; }
+.kb-status-ok { background:rgba(46,160,67,0.15); border:1px solid var(--green); color:var(--green); }
+.kb-status-err { background:rgba(248,81,73,0.15); border:1px solid var(--red); color:var(--red); }
+.kb-layout { display:grid; grid-template-columns:300px 1fr; gap:14px; align-items:start; }
+@media (max-width:760px){ .kb-layout { grid-template-columns:1fr; } }
+.kb-sidebar { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius); padding:6px; max-height:70vh; overflow:auto; }
+.kb-group { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); padding:10px 8px 4px; }
+.kb-expert { display:flex; align-items:center; gap:8px; padding:8px; border-radius:var(--radius); cursor:pointer; }
+.kb-expert:hover { background:var(--surface); }
+.kb-expert.selected { background:var(--surface); outline:1px solid var(--accent); }
+.kb-ex-icon { font-size:1.1rem; width:1.4rem; text-align:center; }
+.kb-ex-text { flex:1; line-height:1.2; }
+.kb-ex-text small { color:var(--text-muted); font-size:0.68rem; font-family:ui-monospace,monospace; }
+.kb-badge { background:var(--accent); color:#fff; border-radius:999px; font-size:0.72rem; padding:1px 8px; min-width:20px; text-align:center; }
+.kb-badge-empty { background:var(--border); color:var(--text-muted); }
+.kb-detail { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius); padding:14px; min-height:200px; }
+.kb-detail-empty { color:var(--text-muted); text-align:center; padding:40px 12px; }
+.kb-detail-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px; }
+.kb-detail-head code { font-family:ui-monospace,monospace; color:var(--accent); }
+.kb-new-btn { padding:6px 12px; font-size:0.82rem; }
+.kb-filelist { display:flex; flex-direction:column; gap:4px; }
+.kb-file { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:var(--radius); border:1px solid transparent; }
+.kb-file:hover { background:var(--surface); }
+.kb-file.open { border-color:var(--accent); background:var(--surface); }
+.kb-file-name { flex:1; cursor:pointer; font-size:0.86rem; word-break:break-all; }
+.kb-file-size { color:var(--text-muted); font-size:0.72rem; }
+.kb-del:hover { color:var(--red); }
+.kb-viewer { margin-top:14px; border-top:1px solid var(--border); padding-top:10px; }
+.kb-viewer-head { display:flex; justify-content:space-between; align-items:center; font-family:ui-monospace,monospace; font-size:0.8rem; color:var(--accent); margin-bottom:8px; }
+.kb-edit-btn, .kb-viewer-head .kb-edit-btn { padding:4px 10px; font-size:0.78rem; }
+.kb-viewer-body { max-height:50vh; overflow:auto; }
+.kb-editor { display:flex; flex-direction:column; }
+.kb-label { font-size:0.78rem; color:var(--text-muted); margin:10px 0 4px; }
+.kb-input { padding:9px 12px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:0.88rem; font-family:ui-monospace,monospace; }
+.kb-input[readonly] { opacity:0.7; }
+.kb-hint { font-size:0.72rem; color:var(--text-muted); margin-top:4px; }
+.kb-textarea { margin-top:4px; min-height:320px; resize:vertical; padding:12px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:0.85rem; line-height:1.5; font-family:ui-monospace,monospace; }
+.kb-editor-actions { display:flex; gap:8px; margin-top:12px; }
 </style>
 </head>
 <body>
@@ -4226,7 +4271,7 @@ function renderLangSelector() {
 <script>
 // PART 1: Data structures and constants
 // Substituído pelo build.js com a versão do aidlc-dashboard-extension/package.json
-const APP_VERSION = '0.2.5';
+const APP_VERSION = '0.3.0';
 
 const PHASES = [
   { id:'initialization', stages:['workspace-scaffold','workspace-detection','state-init'] },
@@ -4686,6 +4731,7 @@ function renderDashboard(data) {
       <button class="tab-btn" data-tab="files" role="tab" aria-selected="false" onclick="switchTab('files')">${t('tabFiles')}</button>
       <button class="tab-btn" data-tab="sensors" role="tab" aria-selected="false" onclick="switchTab('sensors')" hidden>${t('tabSensors')}</button>
       <button class="tab-btn" data-tab="knowledge" role="tab" aria-selected="false" onclick="switchTab('knowledge')">${t('tabKnowledge')}</button>
+      <button class="tab-btn" data-tab="experts" role="tab" aria-selected="false" onclick="switchTab('experts')">${t('tabExperts')}</button>
       <button class="tab-btn" data-tab="audit" role="tab" aria-selected="false" onclick="switchTab('audit')">${t('tabAudit')}</button>
       <button class="tab-btn" data-tab="tokens" role="tab" aria-selected="false" onclick="switchTab('tokens')">${t('tabTokens')}</button>
       <button class="tab-btn" data-tab="help" role="tab" aria-selected="false" onclick="switchTab('help')">${t('tabHelp')}</button>
@@ -4697,6 +4743,7 @@ function renderDashboard(data) {
     <div id="tab-files" class="tab-content" role="tabpanel">${safeRender(renderFilesTab)}</div>
     <div id="tab-sensors" class="tab-content" role="tabpanel">${safeRender(renderSensorsTab, graph)}</div>
     <div id="tab-knowledge" class="tab-content" role="tabpanel">${safeRender(renderKnowledgeTab, data, state)}</div>
+    <div id="tab-experts" class="tab-content" role="tabpanel">${safeRender(renderExpertsTab, data)}</div>
     <div id="tab-audit" class="tab-content" role="tabpanel">${safeRender(renderAuditTab, intent)}</div>
     <div id="tab-tokens" class="tab-content" role="tabpanel">${safeRender(renderTokensTab)}</div>
     <div id="tab-help" class="tab-content" role="tabpanel">${safeRender(renderHelpTab)}</div>
@@ -5447,6 +5494,8 @@ function switchTab(tabId) {
   if (tabId === 'workflow' && typeof drawWfEdges === 'function') requestAnimationFrame(drawWfEdges);
   // A aba Arquivos renderiza mermaid depois que o leitor está no DOM
   if (tabId === 'files' && typeof runMermaid === 'function') requestAnimationFrame(runMermaid);
+  // A aba Especialistas carrega o conhecimento (Tier 2) sob demanda
+  if (tabId === 'experts' && kbData == null && typeof loadKnowledge === 'function') loadKnowledge();
 }
 
 // --- File browser (aba Arquivos) ---
@@ -6751,6 +6800,475 @@ function toggleUbGrid(el) {
   ubGridOpen = !!(el && el.open);
   if (ubGridOpen && typeof drawWfEdges === 'function') requestAnimationFrame(drawWfEdges);
 }
+</script>
+
+<script>
+// PART 24: Especialistas — gestão do conhecimento de time (Tier 2 do AI-DLC).
+// O AI-DLC carrega conhecimento de time (editável pelo usuário) de
+// aidlc/spaces/<space>/knowledge/<dir>/*.md, onde <dir> é 'aidlc-shared'
+// (lido por todos os agentes) ou o slug EXATO de um agente. Esta aba gerencia
+// SÓ essa camada — nunca .claude/ (Tier 1), memory/ (regras), codekb/ ou
+// documentkb/. A escrita acontece pelo servidor (bridge.js) ou pela File
+// System Access API (standalone); os dois passam pelo mesmo registro fechado
+// de destinos abaixo, então uma pasta com slug errado (que o engine ignoraria
+// em silêncio) nunca é criada por aqui.
+
+const EXPERTS = [
+  { slug:'aidlc-shared',                  group:'shared',   icon:'🌐', role:{ pt:'Compartilhado — todos os agentes', en:'Shared — all agents', es:'Compartido — todos los agentes' } },
+  { slug:'aidlc-product-agent',           group:'domain',   icon:'📋', role:{ pt:'Product Manager / BA', en:'Product Manager / BA', es:'Product Manager / BA' } },
+  { slug:'aidlc-design-agent',            group:'domain',   icon:'🎨', role:{ pt:'UX Designer', en:'UX Designer', es:'Diseñador UX' } },
+  { slug:'aidlc-delivery-agent',          group:'domain',   icon:'📦', role:{ pt:'Delivery Manager', en:'Delivery Manager', es:'Delivery Manager' } },
+  { slug:'aidlc-architect-agent',         group:'domain',   icon:'🏛️', role:{ pt:'Arquiteto de Soluções', en:'Solutions Architect', es:'Arquitecto de Soluciones' } },
+  { slug:'aidlc-aws-platform-agent',      group:'domain',   icon:'☁️', role:{ pt:'Plataforma AWS', en:'AWS Platform', es:'Plataforma AWS' } },
+  { slug:'aidlc-compliance-agent',        group:'domain',   icon:'⚖️', role:{ pt:'Compliance (suporte)', en:'Compliance (support)', es:'Compliance (soporte)' } },
+  { slug:'aidlc-devsecops-agent',         group:'domain',   icon:'🔐', role:{ pt:'DevSecOps (suporte)', en:'DevSecOps (support)', es:'DevSecOps (soporte)' } },
+  { slug:'aidlc-developer-agent',         group:'domain',   icon:'💻', role:{ pt:'Desenvolvedor', en:'Developer', es:'Desarrollador' } },
+  { slug:'aidlc-quality-agent',           group:'domain',   icon:'🧪', role:{ pt:'QA Engineer', en:'QA Engineer', es:'QA Engineer' } },
+  { slug:'aidlc-pipeline-deploy-agent',   group:'domain',   icon:'🚀', role:{ pt:'Pipeline & Deploy', en:'Pipeline & Deploy', es:'Pipeline & Deploy' } },
+  { slug:'aidlc-operations-agent',        group:'domain',   icon:'📟', role:{ pt:'SRE / Operações', en:'SRE / Operations', es:'SRE / Operaciones' } },
+  { slug:'aidlc-product-lead-agent',      group:'reviewer', icon:'🔎', role:{ pt:'Revisor — Product Lead', en:'Reviewer — Product Lead', es:'Revisor — Product Lead' } },
+  { slug:'aidlc-architecture-reviewer-agent', group:'reviewer', icon:'🔎', role:{ pt:'Revisor — Arquitetura', en:'Reviewer — Architecture', es:'Revisor — Arquitectura' } },
+  { slug:'aidlc-composer-agent',          group:'composer', icon:'🧩', role:{ pt:'Compositor adaptativo', en:'Adaptive composer', es:'Compositor adaptativo' } },
+];
+const EXPERT_GROUP_LABEL = {
+  shared:   { pt:'Compartilhado', en:'Shared', es:'Compartido' },
+  domain:   { pt:'Especialistas de domínio (11)', en:'Domain experts (11)', es:'Expertos de dominio (11)' },
+  reviewer: { pt:'Revisores (2)', en:'Reviewers (2)', es:'Revisores (2)' },
+  composer: { pt:'Compositor (1)', en:'Composer (1)', es:'Compositor (1)' },
+};
+const KB_NAME_RE = /^[a-z0-9][a-z0-9._-]*\.md$/;
+
+// Estado da aba (sobrevive a re-render; some ao trocar de projeto).
+let kbData = null;          // { space, spaces, knowledgeExists, dirs:{slug:[{name,bytes,mtime}]} }
+let kbSelectedSlug = null;  // especialista selecionado
+let kbOpenFile = null;      // { slug, name } aberto no leitor
+let kbEditing = false;      // modo edição (new/edit) ativo
+let kbIsNew = false;        // editor em modo "novo arquivo"
+let kbContentCache = {};    // "slug\u0000name" -> conteúdo
+let kbStatus = null;        // { kind:'ok'|'err', msg } transitório
+
+function expertRole(e) { return e.role[lang] || e.role.en; }
+function expertBySlug(slug) { return EXPERTS.find(e => e.slug === slug) || null; }
+function kbKey(slug, name) { return slug + '\u0000' + name; }
+function kbFilesOf(slug) { return (kbData && kbData.dirs && kbData.dirs[slug]) || []; }
+function kbTotalFiles() { return kbData ? EXPERTS.reduce((a, e) => a + kbFilesOf(e.slug).length, 0) : 0; }
+
+// Re-renderiza apenas o painel da aba (preserva foco mínimo; roda mermaid no preview).
+function kbRerender() {
+  const el = document.getElementById('tab-experts');
+  if (el) { el.innerHTML = safeRender(renderExpertsTab, dashboardData); requestAnimationFrame(runMermaid); }
+}
+
+function renderExpertsTab(data) {
+  if (kbData == null) {
+    if (typeof loadKnowledge === 'function') loadKnowledge();
+    return `<div class="empty-state">${t('loading')}</div>`;
+  }
+  if (kbData.error) return `<div class="empty-state">${esc(kbData.error)}</div>`;
+
+  // Sidebar: grupos de especialistas com contagem de arquivos.
+  let side = '';
+  let lastGroup = null;
+  for (const e of EXPERTS) {
+    if (e.group !== lastGroup) {
+      side += `<div class="kb-group">${esc(EXPERT_GROUP_LABEL[e.group][lang] || EXPERT_GROUP_LABEL[e.group].en)}</div>`;
+      lastGroup = e.group;
+    }
+    const n = kbFilesOf(e.slug).length;
+    const sel = e.slug === kbSelectedSlug ? ' selected' : '';
+    const count = n ? `<span class="kb-badge">${n}</span>` : '<span class="kb-badge kb-badge-empty">0</span>';
+    side += `<div class="kb-expert${sel}" onclick="kbSelectExpert('${e.slug}')" title="${esc(e.slug)}">
+      <span class="kb-ex-icon">${e.icon}</span>
+      <span class="kb-ex-text"><strong>${esc(expertRole(e))}</strong><br><small>${esc(e.slug)}</small></span>
+      ${count}
+    </div>`;
+  }
+
+  const header = `<div class="kb-top">
+      <div><strong>${t('kbTitle')}</strong> · <span class="kb-space">${t('kbSpace')}: ${esc(kbData.space)}</span>
+        · <span class="kb-muted">${tf('kbTotal', { n: kbTotalFiles() })}</span></div>
+      <div class="kb-muted kb-path">aidlc/spaces/${esc(kbData.space)}/knowledge/</div>
+    </div>`;
+
+  const statusBar = kbStatus
+    ? `<div class="kb-status ${kbStatus.kind === 'err' ? 'kb-status-err' : 'kb-status-ok'}">${esc(kbStatus.msg)}</div>`
+    : '';
+
+  return `${header}${statusBar}
+    <div class="kb-layout">
+      <div class="kb-sidebar">${side}</div>
+      <div class="kb-detail">${renderExpertDetail()}</div>
+    </div>`;
+}
+
+function renderExpertDetail() {
+  if (!kbSelectedSlug) return `<div class="kb-detail-empty">${t('kbPickExpert')}</div>`;
+  const e = expertBySlug(kbSelectedSlug);
+  if (!e) return `<div class="kb-detail-empty">${t('kbPickExpert')}</div>`;
+  const files = kbFilesOf(e.slug);
+
+  // Editor aberto?
+  if (kbEditing) return renderKbEditor(e);
+
+  const loadNote = e.group === 'shared' ? t('kbLoadedShared')
+    : e.group === 'reviewer' ? t('kbLoadedReviewer')
+    : e.group === 'composer' ? t('kbLoadedComposer')
+    : t('kbLoadedAgent');
+
+  let head = `<div class="kb-detail-head">
+      <div><span class="kb-ex-icon">${e.icon}</span> <strong>${esc(expertRole(e))}</strong>
+        <div class="kb-muted"><code>${esc(e.slug)}/</code> — ${loadNote}</div></div>
+      <button class="load-btn kb-new-btn" onclick="kbNewFile()">+ ${t('kbNew')}</button>
+    </div>`;
+
+  let list;
+  if (!files.length) {
+    list = `<div class="kb-detail-empty">${t('kbNoFiles')}</div>`;
+  } else {
+    list = '<div class="kb-filelist">' + files.map(f => {
+      const open = kbOpenFile && kbOpenFile.slug === e.slug && kbOpenFile.name === f.name;
+      return `<div class="kb-file${open ? ' open' : ''}">
+        <span class="kb-file-name" onclick="kbOpen('${e.slug}','${esc(f.name)}')">📄 ${esc(f.name)}</span>
+        <span class="kb-file-size">${fmtBytes(f.bytes)}</span>
+        <button class="info-btn" title="${t('kbEdit')}" onclick="kbOpenEdit('${e.slug}','${esc(f.name)}')">✎</button>
+        <button class="info-btn kb-del" title="${t('kbDelete')}" onclick="kbConfirmDelete('${e.slug}','${esc(f.name)}')">🗑</button>
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  // Leitor do arquivo aberto.
+  let viewer = '';
+  if (kbOpenFile && kbOpenFile.slug === e.slug) {
+    const content = kbContentCache[kbKey(kbOpenFile.slug, kbOpenFile.name)];
+    viewer = `<div class="kb-viewer">
+      <div class="kb-viewer-head">${esc(kbOpenFile.name)}
+        <button class="load-btn kb-edit-btn" onclick="kbOpenEdit('${e.slug}','${esc(kbOpenFile.name)}')">✎ ${t('kbEdit')}</button>
+      </div>
+      <div class="kb-viewer-body fb-md">${content == null ? t('loading') : renderMarkdown(content)}</div>
+    </div>`;
+  }
+
+  return head + list + viewer;
+}
+
+function renderKbEditor(e) {
+  const name = kbIsNew ? (kbDraftName || '') : kbOpenFile.name;
+  const content = kbIsNew ? (kbDraftContent || '') : (kbContentCache[kbKey(e.slug, kbOpenFile.name)] || '');
+  const title = kbIsNew ? t('kbNewIn') : t('kbEditing');
+  return `<div class="kb-editor">
+    <div class="kb-detail-head">
+      <div><span class="kb-ex-icon">${e.icon}</span> <strong>${title}</strong>
+        <div class="kb-muted"><code>${esc(e.slug)}/</code></div></div>
+    </div>
+    <label class="kb-label">${t('kbFileName')}</label>
+    <input id="kb-name" class="kb-input" type="text" placeholder="api-gateway-standards.md"
+      value="${esc(name)}" ${kbIsNew ? '' : 'readonly'}>
+    <div class="kb-hint">${t('kbNameHint')}</div>
+    <label class="kb-label">${t('kbContent')}</label>
+    <textarea id="kb-content" class="kb-textarea" spellcheck="false" placeholder="# Título&#10;...">${esc(content)}</textarea>
+    <div class="kb-editor-actions">
+      <button class="load-btn" onclick="kbSave()">💾 ${t('kbSave')}</button>
+      <button class="refresh-btn" onclick="kbCancelEdit()">${t('kbCancel')}</button>
+    </div>
+  </div>`;
+}
+
+let kbDraftName = '';
+let kbDraftContent = '';
+
+function kbSelectExpert(slug) {
+  kbSelectedSlug = slug;
+  kbOpenFile = null; kbEditing = false; kbIsNew = false; kbStatus = null;
+  kbRerender();
+}
+
+function kbOpen(slug, name) {
+  kbSelectedSlug = slug; kbEditing = false; kbIsNew = false; kbStatus = null;
+  kbOpenFile = { slug, name };
+  if (kbContentCache[kbKey(slug, name)] != null) { kbRerender(); return; }
+  if (typeof requestKnowledgeFile === 'function') requestKnowledgeFile(slug, name);
+  else kbRerender();
+}
+
+function kbOpenEdit(slug, name) {
+  kbSelectedSlug = slug; kbOpenFile = { slug, name }; kbIsNew = false; kbStatus = null;
+  if (kbContentCache[kbKey(slug, name)] != null) { kbEditing = true; kbRerender(); return; }
+  // precisa do conteúdo antes de editar
+  kbPendingEdit = { slug, name };
+  if (typeof requestKnowledgeFile === 'function') requestKnowledgeFile(slug, name);
+  else { kbEditing = true; kbRerender(); }
+}
+let kbPendingEdit = null;
+
+function kbNewFile() {
+  if (!kbSelectedSlug) return;
+  kbIsNew = true; kbEditing = true; kbOpenFile = null; kbStatus = null;
+  kbDraftName = ''; kbDraftContent = '';
+  kbRerender();
+  const el = document.getElementById('kb-name'); if (el) el.focus();
+}
+
+function kbCancelEdit() {
+  kbEditing = false; kbIsNew = false; kbStatus = null;
+  kbRerender();
+}
+
+function kbSave() {
+  const nameEl = document.getElementById('kb-name');
+  const contentEl = document.getElementById('kb-content');
+  if (!nameEl || !contentEl) return;
+  let name = (nameEl.value || '').trim();
+  const content = contentEl.value;
+  if (kbIsNew && name && !/\.md$/i.test(name)) name += '.md';
+  name = name.toLowerCase();
+  if (!KB_NAME_RE.test(name)) { kbSetStatus('err', t('kbBadName')); return; }
+  const slug = kbSelectedSlug;
+  // preserva o rascunho caso a escrita falhe e a aba re-renderize
+  kbDraftName = name; kbDraftContent = content;
+  if (typeof saveKnowledgeFile === 'function') saveKnowledgeFile(slug, name, content);
+}
+
+function kbConfirmDelete(slug, name) {
+  openModal(`<h3 style="margin-top:0">${t('kbDelete')}</h3>
+    <p>${tf('kbDeleteConfirm', { name: esc(name), slug: esc(slug) })}</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="refresh-btn" onclick="closeModal()">${t('kbCancel')}</button>
+      <button class="load-btn" style="background:var(--red)" onclick="kbDoDelete('${slug}','${esc(name)}')">🗑 ${t('kbDelete')}</button>
+    </div>`);
+}
+
+function kbDoDelete(slug, name) {
+  closeModal();
+  if (typeof deleteKnowledgeFile === 'function') deleteKnowledgeFile(slug, name);
+}
+
+function kbSetStatus(kind, msg) {
+  kbStatus = { kind, msg };
+  kbRerender();
+  if (kind === 'ok') setTimeout(() => { if (kbStatus && kbStatus.msg === msg) { kbStatus = null; kbRerender(); } }, 3000);
+}
+
+// Chamado pelo ambiente (bridge/FS Access) quando a listagem chega.
+function kbOnData(knowledge) {
+  kbData = knowledge;
+  if (!kbSelectedSlug && knowledge && !knowledge.error) kbSelectedSlug = 'aidlc-shared';
+  // Se o arquivo aberto no leitor sumiu por fora (apagado/renomeado no disco),
+  // fecha o leitor para não mostrar conteúdo órfão.
+  if (kbOpenFile && knowledge && knowledge.dirs) {
+    const list = knowledge.dirs[kbOpenFile.slug] || [];
+    if (!list.some(f => f.name === kbOpenFile.name)) {
+      delete kbContentCache[kbKey(kbOpenFile.slug, kbOpenFile.name)];
+      kbOpenFile = null;
+    }
+  }
+  kbRerender();
+}
+
+// Mudança externa (watcher): alguém editou knowledge fora da UI — pelo engine do
+// AI-DLC ou direto no disco. Reflete na tela, como o resto do dashboard faz.
+// Regras: só age se a aba já carregou (kbData != null); NÃO atualiza durante uma
+// edição não salva (kbEditing) para não descartar o texto do editor; e, se um
+// arquivo está aberto no leitor, re-lê o conteúdo dele do disco.
+function kbOnExternalChange() {
+  if (kbData == null) return;
+  if (kbEditing) return;
+  if (typeof loadKnowledge === 'function') loadKnowledge();
+  if (kbOpenFile && typeof requestKnowledgeFile === 'function') {
+    requestKnowledgeFile(kbOpenFile.slug, kbOpenFile.name);
+  }
+}
+// Chamado quando o conteúdo de um arquivo chega.
+function kbOnFile(slug, name, content) {
+  kbContentCache[kbKey(slug, name)] = content == null ? '' : content;
+  if (kbPendingEdit && kbPendingEdit.slug === slug && kbPendingEdit.name === name) {
+    kbPendingEdit = null; kbEditing = true;
+  }
+  kbRerender();
+}
+// Chamado após salvar/apagar com sucesso.
+function kbOnSaved(op, slug, name) {
+  if (op === 'write') {
+    kbContentCache[kbKey(slug, name)] = kbDraftContent;
+    kbEditing = false; kbIsNew = false; kbOpenFile = { slug, name };
+    kbSetStatus('ok', tf('kbSaved', { name }));
+  } else if (op === 'delete') {
+    delete kbContentCache[kbKey(slug, name)];
+    if (kbOpenFile && kbOpenFile.slug === slug && kbOpenFile.name === name) kbOpenFile = null;
+    kbSetStatus('ok', tf('kbDeleted', { name }));
+  } else {
+    kbRerender();
+  }
+}
+function kbOnError(op, msg) { kbSetStatus('err', msg || 'error'); }
+
+function fmtBytes(b) {
+  b = b || 0;
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+// ─── IO padrão: File System Access API (standalone dashboard.html) ───────────
+// O bridge.js (variante web) sobrescreve estas quatro funções para falar com o
+// servidor por WebSocket. Mantê-las aqui preserva o engine standalone.
+
+async function kbEnsureWritable() {
+  if (!rootDirHandle) return false;
+  try {
+    const opts = { mode: 'readwrite' };
+    if ((await rootDirHandle.queryPermission(opts)) === 'granted') return true;
+    return (await rootDirHandle.requestPermission(opts)) === 'granted';
+  } catch { return false; }
+}
+
+async function loadKnowledge() {
+  if (!rootDirHandle) { kbOnData({ error: 'No folder selected' }); return; }
+  const space = (dashboardData && dashboardData.activeSpace) || 'default';
+  const dirs = {};
+  for (const e of EXPERTS) {
+    dirs[e.slug] = [];
+    const d = await findDir(rootDirHandle, `spaces/${space}/knowledge/${e.slug}`);
+    if (!d) continue;
+    try {
+      for await (const [n, h] of d.entries()) {
+        if (h.kind === 'file' && n.toLowerCase().endsWith('.md')) {
+          let bytes = 0; try { bytes = (await h.getFile()).size; } catch {}
+          dirs[e.slug].push({ name: n, bytes, mtime: null });
+        }
+      }
+      dirs[e.slug].sort((a, b) => a.name.localeCompare(b.name));
+    } catch {}
+  }
+  const kroot = await findDir(rootDirHandle, `spaces/${space}/knowledge`);
+  kbOnData({ space, spaces: [space], knowledgeExists: !!kroot, dirs });
+}
+
+async function requestKnowledgeFile(slug, name) {
+  const space = (kbData && kbData.space) || 'default';
+  let content = '';
+  try { content = await readAidlcFile(rootDirHandle, `spaces/${space}/knowledge/${slug}/${name}`); }
+  catch { content = ''; }
+  kbOnFile(slug, name, content);
+}
+
+async function saveKnowledgeFile(slug, name, content) {
+  const space = (kbData && kbData.space) || 'default';
+  if (!(await kbEnsureWritable())) { kbOnError('write', t('kbNoPermission')); return; }
+  try {
+    let dir = await getOrCreateDir(rootDirHandle, `spaces/${space}/knowledge/${slug}`);
+    const fh = await dir.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(content); await w.close();
+    await loadKnowledge();
+    kbOnSaved('write', slug, name);
+  } catch (e) { kbOnError('write', e.message || String(e)); }
+}
+
+async function deleteKnowledgeFile(slug, name) {
+  const space = (kbData && kbData.space) || 'default';
+  if (!(await kbEnsureWritable())) { kbOnError('delete', t('kbNoPermission')); return; }
+  try {
+    const dir = await findDir(rootDirHandle, `spaces/${space}/knowledge/${slug}`);
+    if (dir) await dir.removeEntry(name);
+    await loadKnowledge();
+    kbOnSaved('delete', slug, name);
+  } catch (e) { kbOnError('delete', e.message || String(e)); }
+}
+
+// Navega criando diretórios (FS Access) — usado só na escrita standalone.
+async function getOrCreateDir(rootHandle, relPath) {
+  // relPath é relativo ao handle da pasta aidlc/ (rootDirHandle)
+  let cur = rootHandle;
+  for (const part of relPath.split('/').filter(Boolean)) {
+    cur = await cur.getDirectoryHandle(part, { create: true });
+  }
+  return cur;
+}
+
+;
+
+// PART 24b: I18N — aba Especialistas
+Object.assign(I18N.pt = I18N.pt || {}, {
+  tabExperts: 'Especialistas',
+  kbTitle: 'Conhecimento de time (Tier 2)',
+  kbSpace: 'Space',
+  kbTotal: '{n} arquivo(s) de conhecimento',
+  kbPickExpert: 'Selecione um especialista à esquerda para ver e editar o conhecimento dele.',
+  kbLoadedShared: 'carregado por TODOS os agentes em toda stage',
+  kbLoadedAgent: 'carregado só quando este agente atua',
+  kbLoadedReviewer: 'agente revisor — carregado quando ele revisa',
+  kbLoadedComposer: 'compositor adaptativo — carregado ao compor o workflow',
+  kbNew: 'Novo arquivo',
+  kbNoFiles: 'Nenhum conhecimento ainda. Clique em “+ Novo arquivo” para adicionar.',
+  kbEdit: 'Editar',
+  kbDelete: 'Excluir',
+  kbNewIn: 'Novo conhecimento',
+  kbEditing: 'Editando conhecimento',
+  kbFileName: 'Nome do arquivo',
+  kbNameHint: 'minúsculas, separado por hífen, terminando em .md (ex.: api-gateway-standards.md). Um tópico por arquivo.',
+  kbContent: 'Conteúdo (Markdown)',
+  kbSave: 'Salvar',
+  kbCancel: 'Cancelar',
+  kbBadName: 'Nome inválido. Use minúsculas, hífen e termine com .md',
+  kbDeleteConfirm: 'Excluir <strong>{name}</strong> de <code>{slug}/</code>? Isso remove o arquivo do disco.',
+  kbSaved: 'Salvo: {name}',
+  kbDeleted: 'Excluído: {name}',
+  kbNoPermission: 'Permissão de escrita negada pelo navegador.',
+});
+Object.assign(I18N.en = I18N.en || {}, {
+  tabExperts: 'Experts',
+  kbTitle: 'Team knowledge (Tier 2)',
+  kbSpace: 'Space',
+  kbTotal: '{n} knowledge file(s)',
+  kbPickExpert: 'Pick an expert on the left to view and edit its knowledge.',
+  kbLoadedShared: 'loaded by EVERY agent on every stage',
+  kbLoadedAgent: 'loaded only when this agent is active',
+  kbLoadedReviewer: 'reviewer agent — loaded when it reviews',
+  kbLoadedComposer: 'adaptive composer — loaded when composing the workflow',
+  kbNew: 'New file',
+  kbNoFiles: 'No knowledge yet. Click “+ New file” to add one.',
+  kbEdit: 'Edit',
+  kbDelete: 'Delete',
+  kbNewIn: 'New knowledge',
+  kbEditing: 'Editing knowledge',
+  kbFileName: 'File name',
+  kbNameHint: 'lowercase, hyphen-separated, ending in .md (e.g. api-gateway-standards.md). One topic per file.',
+  kbContent: 'Content (Markdown)',
+  kbSave: 'Save',
+  kbCancel: 'Cancel',
+  kbBadName: 'Invalid name. Use lowercase, hyphens, and end with .md',
+  kbDeleteConfirm: 'Delete <strong>{name}</strong> from <code>{slug}/</code>? This removes the file from disk.',
+  kbSaved: 'Saved: {name}',
+  kbDeleted: 'Deleted: {name}',
+  kbNoPermission: 'Write permission denied by the browser.',
+});
+Object.assign(I18N.es = I18N.es || {}, {
+  tabExperts: 'Especialistas',
+  kbTitle: 'Conocimiento de equipo (Tier 2)',
+  kbSpace: 'Space',
+  kbTotal: '{n} archivo(s) de conocimiento',
+  kbPickExpert: 'Elige un especialista a la izquierda para ver y editar su conocimiento.',
+  kbLoadedShared: 'cargado por TODOS los agentes en cada stage',
+  kbLoadedAgent: 'cargado solo cuando este agente actúa',
+  kbLoadedReviewer: 'agente revisor — cargado cuando revisa',
+  kbLoadedComposer: 'compositor adaptativo — cargado al componer el workflow',
+  kbNew: 'Nuevo archivo',
+  kbNoFiles: 'Aún no hay conocimiento. Pulsa “+ Nuevo archivo” para agregar.',
+  kbEdit: 'Editar',
+  kbDelete: 'Eliminar',
+  kbNewIn: 'Nuevo conocimiento',
+  kbEditing: 'Editando conocimiento',
+  kbFileName: 'Nombre del archivo',
+  kbNameHint: 'minúsculas, separado por guiones, terminando en .md (ej.: api-gateway-standards.md). Un tema por archivo.',
+  kbContent: 'Contenido (Markdown)',
+  kbSave: 'Guardar',
+  kbCancel: 'Cancelar',
+  kbBadName: 'Nombre inválido. Usa minúsculas, guiones y termina con .md',
+  kbDeleteConfirm: '¿Eliminar <strong>{name}</strong> de <code>{slug}/</code>? Esto borra el archivo del disco.',
+  kbSaved: 'Guardado: {name}',
+  kbDeleted: 'Eliminado: {name}',
+  kbNoPermission: 'Permiso de escritura denegado por el navegador.',
+});
 </script>
 
 </body>
