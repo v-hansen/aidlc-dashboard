@@ -53,9 +53,20 @@ function connectWebSocket() {
       fbSelectedPath = msg.path;
       const el = document.getElementById('tab-files');
       if (el) { el.innerHTML = safeRender(renderFilesTab); requestAnimationFrame(runMermaid); }
+    } else if (msg.type === 'knowledge') {
+      if (typeof kbOnData === 'function') kbOnData(msg.knowledge);
+    } else if (msg.type === 'knowledgeFile') {
+      if (typeof kbOnFile === 'function') kbOnFile(msg.slug, msg.name, msg.content);
+    } else if (msg.type === 'knowledgeSaved') {
+      if (typeof kbOnSaved === 'function') kbOnSaved(msg.op, msg.slug, msg.name);
+    } else if (msg.type === 'knowledgeError') {
+      if (typeof kbOnError === 'function') kbOnError(msg.op, msg.error);
     } else if (msg.type === 'refresh') {
       // Server signalled a file change — ask for fresh data.
       if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'refresh' }));
+      // Knowledge lives under aidlc/ too, so the same watch event covers it:
+      // refresh the Experts tab if it's loaded (no-op while editing).
+      if (typeof kbOnExternalChange === 'function') kbOnExternalChange();
     }
   };
 
@@ -223,6 +234,28 @@ async function openAidlcFile(path) {
   } else if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'readFile', path }));
   }
+}
+
+// ─── Team Knowledge (Especialistas tab): override core.js FS-Access IO ───────
+// The page has no filesystem of its own, so all four operations go over the
+// WebSocket to server.js, which owns the sandboxed write path. Responses arrive
+// as 'knowledge' / 'knowledgeFile' / 'knowledgeSaved' / 'knowledgeError' and
+// are dispatched to the kbOn* handlers in core.js.
+function kbSpace() { return (kbData && kbData.space) || undefined; }
+
+async function loadKnowledge() {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'listKnowledge', space: kbSpace() }));
+}
+async function requestKnowledgeFile(slug, name) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'readKnowledge', space: kbSpace(), slug, name }));
+}
+async function saveKnowledgeFile(slug, name, content) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'writeKnowledge', space: kbSpace(), slug, name, content }));
+  else if (typeof kbOnError === 'function') kbOnError('write', 'offline');
+}
+async function deleteKnowledgeFile(slug, name) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'deleteKnowledge', space: kbSpace(), slug, name }));
+  else if (typeof kbOnError === 'function') kbOnError('delete', 'offline');
 }
 
 // Auto-refresh is handled server-side by the file watcher (WebSocket push).

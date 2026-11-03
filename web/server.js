@@ -413,6 +413,161 @@ async function readAidlcFile(relPath) {
   return readText(abs);
 }
 
+// ─── Team Knowledge store (Tier 2): manage aidlc/spaces/<space>/knowledge/ ────
+// WRITE surface. AI-DLC's Tier 2 "team knowledge" is the ONLY user-owned
+// knowledge layer: free-form .md files under aidlc/spaces/<space>/knowledge/,
+// in an `aidlc-shared/` dir (loaded by every agent) or a per-agent dir whose
+// name must match the agent slug EXACTLY (a typo'd dir is silently ignored by
+// the engine). We never touch Tier 1 (.claude/), the rules layer (memory/),
+// codekb/, documentkb/ (AI-DLC-derived) or intents/ through this surface.
+//
+// Every mutation passes sandboxKnowledge(): destination must be an allowed slug
+// (closed list below), the filename must be a safe lowercase `*.md`, and the
+// resolved absolute path must stay under the space's knowledge/ root. This is a
+// loopback-only server, but the sandbox is what keeps "manage knowledge" from
+// becoming "write anywhere under the project".
+
+// The 14 shipped agents + the special shared bucket. Closed allow-list: a
+// destination outside this set is rejected, which also prevents creating a
+// typo'd directory the engine would ignore.
+const AIDLC_AGENT_SLUGS = [
+  'aidlc-product-agent', 'aidlc-design-agent', 'aidlc-delivery-agent',
+  'aidlc-architect-agent', 'aidlc-aws-platform-agent', 'aidlc-compliance-agent',
+  'aidlc-devsecops-agent', 'aidlc-developer-agent', 'aidlc-quality-agent',
+  'aidlc-pipeline-deploy-agent', 'aidlc-operations-agent',
+  'aidlc-product-lead-agent', 'aidlc-architecture-reviewer-agent',
+  'aidlc-composer-agent',
+];
+const KNOWLEDGE_ALLOWED_DIRS = new Set(['aidlc-shared', ...AIDLC_AGENT_SLUGS]);
+// Lowercase, hyphen/dot-separated, must end in .md. Mirrors AI-DLC's filename
+// guidance and blocks path separators, leading dots, and non-.md files.
+const KNOWLEDGE_NAME_RE = /^[a-z0-9][a-z0-9._-]*\.md$/;
+const MAX_KNOWLEDGE_BYTES = 512 * 1024;
+
+async function getActiveSpace() {
+  const root = aidlcRoot();
+  if (!root) return 'default';
+  const raw = await readText(path.join(root, 'active-space'));
+  return (raw ? raw.trim() : '') || 'default';
+}
+
+async function listSpaces() {
+  const root = aidlcRoot();
+  if (!root) return ['default'];
+  try {
+    const entries = await fs.readdir(path.join(root, 'spaces'), { withFileTypes: true });
+    const dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => e.name);
+    return dirs.length ? dirs.sort() : ['default'];
+  } catch { return ['default']; }
+}
+
+function knowledgeRootFor(space) {
+  const root = aidlcRoot();
+  if (!root) return null;
+  // space is validated by the caller against listSpaces(); still strip any
+  // separators defensively so it can never climb out of spaces/.
+  const safeSpace = String(space || 'default').replace(/[\/\\]/g, '');
+  return path.join(root, 'spaces', safeSpace, 'knowledge');
+}
+
+// Resolve + validate a single knowledge file location. Throws on any violation.
+function sandboxKnowledge(space, slug, name) {
+  if (!KNOWLEDGE_ALLOWED_DIRS.has(slug)) {
+    const err = new Error('invalid knowledge directory: ' + slug);
+    err.code = 'BAD_SLUG';
+    throw err;
+  }
+  if (typeof name !== 'string' || !KNOWLEDGE_NAME_RE.test(name)) {
+    const err = new Error('invalid filename (use lowercase kebab-case ending in .md)');
+    err.code = 'BAD_NAME';
+    throw err;
+  }
+  const kroot = knowledgeRootFor(space);
+  if (!kroot) {
+    const err = new Error('no project selected');
+    err.code = 'NO_PROJECT';
+    throw err;
+  }
+  const dir = path.resolve(kroot, slug);
+  const abs = path.resolve(dir, name);
+  const krootResolved = path.resolve(kroot);
+  // abs must be exactly <kroot>/<slug>/<name>; guard against traversal.
+  if (abs !== path.join(krootResolved, slug, name) || !abs.startsWith(krootResolved + path.sep)) {
+    const err = new Error('path escapes knowledge root');
+    err.code = 'ESCAPE';
+    throw err;
+  }
+  return { abs, dir, kroot: krootResolved };
+}
+
+// Listing: for the active (or requested) space, every allowed dir that exists
+// with its .md files. The client holds the human labels/roles; the server only
+// reports what is on disk + whether the knowledge/ root exists yet (bootstrap).
+async function listKnowledge(requestedSpace) {
+  const root = aidlcRoot();
+  if (!root) return { error: 'No project selected' };
+  const spaces = await listSpaces();
+  const space = spaces.includes(requestedSpace) ? requestedSpace : await getActiveSpace();
+  const kroot = knowledgeRootFor(space);
+  let knowledgeExists = false;
+  try { await fs.access(kroot); knowledgeExists = true; } catch { }
+
+  const dirs = {};
+  for (const slug of KNOWLEDGE_ALLOWED_DIRS) {
+    const d = path.join(kroot, slug);
+    let files = [];
+    try {
+      const entries = await fs.readdir(d, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
+          let bytes = 0, mtime = null;
+          try { const st = await fs.stat(path.join(d, e.name)); bytes = st.size; mtime = st.mtimeMs; } catch { }
+          files.push({ name: e.name, bytes, mtime });
+        }
+      }
+      files.sort((a, b) => a.name.localeCompare(b.name));
+    } catch { /* dir absent — reported as empty */ }
+    dirs[slug] = files;
+  }
+  return { space, spaces, knowledgeExists, dirs };
+}
+
+async function readKnowledge(space, slug, name) {
+  const { abs } = sandboxKnowledge(space, slug, name);
+  return readText(abs);
+}
+
+async function writeKnowledge(space, slug, name, content) {
+  const { abs, dir } = sandboxKnowledge(space, slug, name);
+  const body = String(content == null ? '' : content);
+  if (Buffer.byteLength(body, 'utf8') > MAX_KNOWLEDGE_BYTES) {
+    const err = new Error('file too large'); err.code = 'TOO_LARGE'; throw err;
+  }
+  await fs.mkdir(dir, { recursive: true });
+  // Atomic write: temp + rename, so the dashboard's own fs.watch never reads a
+  // half-written file.
+  const tmp = path.join(dir, '.' + name + '.tmp-' + process.pid + '-' + Date.now());
+  await fs.writeFile(tmp, body, 'utf8');
+  await fs.rename(tmp, abs);
+  return true;
+}
+
+async function deleteKnowledge(space, slug, name) {
+  const { abs } = sandboxKnowledge(space, slug, name);
+  try { await fs.unlink(abs); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  return true;
+}
+
+async function renameKnowledge(space, slug, name, newSlug, newName) {
+  const src = sandboxKnowledge(space, slug, name);
+  const dstSlug = newSlug || slug;
+  const dstName = newName || name;
+  const dst = sandboxKnowledge(space, dstSlug, dstName);
+  await fs.mkdir(dst.dir, { recursive: true });
+  await fs.rename(src.abs, dst.abs);
+  return true;
+}
+
 // ─── WebSocket ──────────────────────────────────────────────────────────────
 
 // Only accept sockets opened by this server's own page. Browsers always send
@@ -463,6 +618,39 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ type: 'file', path: msg.path, content: await readAidlcFile(msg.path) }));
     } else if (msg.type === 'getProject') {
       ws.send(JSON.stringify({ type: 'project', path: projectPath }));
+    } else if (msg.type === 'listKnowledge') {
+      ws.send(JSON.stringify({ type: 'knowledge', knowledge: await listKnowledge(msg.space) }));
+    } else if (msg.type === 'readKnowledge') {
+      try {
+        const content = await readKnowledge(msg.space, msg.slug, msg.name);
+        ws.send(JSON.stringify({ type: 'knowledgeFile', space: msg.space, slug: msg.slug, name: msg.name, content }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'knowledgeError', op: 'read', slug: msg.slug, name: msg.name, error: e.message }));
+      }
+    } else if (msg.type === 'writeKnowledge') {
+      try {
+        await writeKnowledge(msg.space, msg.slug, msg.name, msg.content);
+        ws.send(JSON.stringify({ type: 'knowledgeSaved', op: 'write', slug: msg.slug, name: msg.name }));
+        ws.send(JSON.stringify({ type: 'knowledge', knowledge: await listKnowledge(msg.space) }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'knowledgeError', op: 'write', slug: msg.slug, name: msg.name, error: e.message }));
+      }
+    } else if (msg.type === 'deleteKnowledge') {
+      try {
+        await deleteKnowledge(msg.space, msg.slug, msg.name);
+        ws.send(JSON.stringify({ type: 'knowledgeSaved', op: 'delete', slug: msg.slug, name: msg.name }));
+        ws.send(JSON.stringify({ type: 'knowledge', knowledge: await listKnowledge(msg.space) }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'knowledgeError', op: 'delete', slug: msg.slug, name: msg.name, error: e.message }));
+      }
+    } else if (msg.type === 'renameKnowledge') {
+      try {
+        await renameKnowledge(msg.space, msg.slug, msg.name, msg.newSlug, msg.newName);
+        ws.send(JSON.stringify({ type: 'knowledgeSaved', op: 'rename', slug: msg.newSlug || msg.slug, name: msg.newName || msg.name }));
+        ws.send(JSON.stringify({ type: 'knowledge', knowledge: await listKnowledge(msg.space) }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'knowledgeError', op: 'rename', slug: msg.slug, name: msg.name, error: e.message }));
+      }
     }
   });
 
@@ -492,6 +680,43 @@ app.get('/api/dashboard', async (req, res) => {
 
 app.get('/api/tokens', async (req, res) => {
   res.json(await loadTokens());
+});
+
+// ─── REST: Team Knowledge (Tier 2) ───────────────────────────────────────────
+// Mirrors the WebSocket surface for curl/scripts. All writes go through the same
+// sandboxKnowledge() guard as the socket handlers.
+
+app.get('/api/knowledge', async (req, res) => {
+  res.json(await listKnowledge(req.query.space));
+});
+
+app.get('/api/knowledge/file', async (req, res) => {
+  try {
+    const content = await readKnowledge(req.query.space, req.query.slug, req.query.name);
+    res.json({ slug: req.query.slug, name: req.query.name, content });
+  } catch (e) {
+    res.status(400).json({ error: e.message, code: e.code });
+  }
+});
+
+app.post('/api/knowledge', async (req, res) => {
+  const { space, slug, name, content } = req.body || {};
+  try {
+    await writeKnowledge(space, slug, name, content);
+    res.json({ ok: true, slug, name });
+  } catch (e) {
+    res.status(400).json({ error: e.message, code: e.code });
+  }
+});
+
+app.delete('/api/knowledge', async (req, res) => {
+  const { space, slug, name } = req.body || {};
+  try {
+    await deleteKnowledge(space, slug, name);
+    res.json({ ok: true, slug, name });
+  } catch (e) {
+    res.status(400).json({ error: e.message, code: e.code });
+  }
 });
 
 // ─── Port Discovery ─────────────────────────────────────────────────────────

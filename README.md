@@ -1,6 +1,6 @@
 # AIDLC Dashboard
 
-A real-time dashboard for [AI-DLC](https://github.com/awslabs/aidlc-workflows) workflows (2.0, GA on `main`). It reads the `aidlc/` folder that the AI-DLC engine writes to your project and visualizes workflow status: the workflow shape per scope, phases, stages, approval gates, learned rules, audit trail with recorded decisions, an artifact file browser (with rendered Mermaid diagrams), and consumption (tokens/credits) — including **cost per stage**.
+A real-time dashboard for [AI-DLC](https://github.com/awslabs/aidlc-workflows) workflows (2.0, GA on `main`). It reads the `aidlc/` folder that the AI-DLC engine writes to your project and visualizes workflow status: the workflow shape per scope, phases, stages, approval gates, team knowledge, learned rules, audit trail with recorded decisions, an artifact file browser (with rendered Mermaid diagrams), and consumption (tokens/credits) — including **cost per stage**.
 
 ![AIDLC Dashboard — phases, stages and workflow progress](dashboard.png)
 
@@ -20,6 +20,7 @@ All three render the same UI. Pick whichever fits your workflow.
   - **Units & Bolts** — once Units Generation produces units, the Workflow tab shows the Construction plan (units, Bolt sequence, walking skeleton); during Construction it switches to a live panel (done/running/queued/failed Bolts, per-unit progress through 3.1 → 3.5, DAG dependencies); afterwards it collapses to a read-only summary. Intents without units keep the stage grid.
 - **Phases / Stages** — phase progress and per-stage status, agent and timing; click any item for details.
 - **Files** — browse the `aidlc/` artifact tree and read `.md`/`.json` in place, with **Mermaid diagrams rendered inline**.
+- **Experts** — manage Tier 2 team knowledge for the 14 shipped AI-DLC agents plus the shared knowledge bucket. Create, edit and delete safe Markdown files directly from the dashboard.
 - **Knowledge** — learned decisions and NEVER/ALWAYS rules.
 - **Audit** — a Recorded Decisions card (stage + rationale) plus the event timeline.
 - **Tokens** — token/credit usage and cost per stage (auto-refreshing).
