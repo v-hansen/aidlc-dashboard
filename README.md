@@ -11,12 +11,13 @@ A real-time dashboard for [AI-DLC](https://github.com/awslabs/aidlc-workflows) w
 | `dashboard.html` | Standalone dashboard — a single file, no install, no server |
 | `aidlc-dashboard-x.y.z.vsix` | Extension for Kiro IDE / VS Code |
 | `web/` | Web-server dashboard — runs in any browser via a small Node.js backend (`npm run server {path}`) |
+| `aidlc-v1-dashboard.html` | Standalone dashboard for workflows that still use the AI-DLC v1 `aidlc-docs/` format (PT/EN/ES) |
 
-All three render the same UI. Pick whichever fits your workflow.
+All three render the same UI. Pick whichever fits your workflow. The header has a light/dark theme toggle next to the language selector; the default follows your IDE theme (extension) or your OS preference (browser).
 
 ## Tabs
 
-- **Workflow** (default) — the shape of the run: which of the **33 stages** execute under the active scope (highlighted per phase, skipped ones dimmed), approval-gate counts, and the live done/current stages. Chips preview all 11 scopes.
+- **Workflow** (default) — the shape of the run: which of the **33 stages** execute under the active scope (highlighted per phase, skipped ones struck through), arrows for the dependencies between the stages that run (hover or Tab to a card to highlight what it depends on and what depends on it), approval-gate counts, and the live done/current stages. For the running scope it follows the real plan in `aidlc-state.md` (tailored plans, `/aidlc skip`, composed scopes). Chips preview all 11 scopes.
   - **Units & Bolts** — once Units Generation produces units, the Workflow tab shows the Construction plan (units, Bolt sequence, walking skeleton); during Construction it switches to a live panel (done/running/queued/failed Bolts, per-unit progress through 3.1 → 3.5, DAG dependencies); afterwards it collapses to a read-only summary. Intents without units keep the stage grid.
 - **Phases / Stages** — phase progress and per-stage status, agent and timing; click any item for details.
 - **Files** — browse the `aidlc/` artifact tree and read `.md`/`.json` in place, with **Mermaid diagrams rendered inline**.
@@ -41,6 +42,8 @@ Great for following a live workflow, workshops, or sharing progress with stakeho
 
 No pickers needed: the extension detects the workspace automatically and refreshes instantly via file watcher.
 
+**AI-DLC v1 workflows:** in a project with only an `aidlc-docs/` folder, the same command opens the v1 dashboard (Overview, Process, Phases, Questions, Files and Tokens tabs). To choose explicitly, run **`AIDLC: Open AI-DLC v1 Dashboard`** / **`AIDLC: Open AI-DLC v2 Dashboard`**, or set `aidlcDashboard.version` to `v1` or `v2` (default `auto`).
+
 ## Option 3 — Web server (any browser)
 
 For anyone not using Kiro, Cursor, VS Code or another editor fork: run the dashboard as a small local web app and open it in **any** modern browser (no File System Access API needed).
@@ -58,6 +61,12 @@ npm run server
 
 Then open the URL printed in your terminal (base `http://localhost:3939`). The server auto-increments to the next free port, so you can run several projects at once (e.g. `3939`, `3940`, …). Override the base port with the `PORT` env variable. Updates are pushed **instantly over WebSocket** by a file watcher on the `aidlc/` folder — no 5-second polling. It renders the same UI (workflow, phases, stages, files, knowledge, audit, tokens) as the other two options and stays **fully local**. Requires **Node.js ≥ 18** and works in any modern browser. See [`web/README.md`](web/README.md) for the quick-start and REST API details.
 
+## AI-DLC v1 (standalone)
+
+For workflows that still use the v1 `aidlc-docs/` format, open `aidlc-v1-dashboard.html` in Chrome, Edge or Opera and select the folder that contains `aidlc-docs/`. It shows overall and per-phase progress, a **Process** tab with the v1 timeline (which stages ran, were skipped and why), pending questions, the artifacts and token/credit usage. UI in English, Portuguese and Spanish.
+
+![AI-DLC v1 dashboard: overall progress, indicators and phase progress for an aidlc-docs/ workspace](docs/images/dashboard-v1.png)
+
 ## Consumption & cost per stage
 
 The **Tokens** tab attributes consumption to each workflow stage (by matching timestamps against each stage's execution window):
@@ -69,9 +78,20 @@ The **Tokens** tab attributes consumption to each workflow stage (by matching ti
 
 In the standalone HTML, point the Tokens tab at your transcripts folder; the extension finds it automatically. On macOS, press `Cmd+Shift+.` in the folder picker to reveal hidden folders.
 
+<details>
+<summary>More screenshots</summary>
+
+![Workflow tab in the light theme, with the mouse over Requirements Analysis: its dependency arrows and the stages it connects are highlighted](docs/images/workflow-light.png)
+
+![Experts tab: Tier 2 team knowledge grouped by agent](docs/images/experts.png)
+
+![Files tab: the aidlc/ artifact tree with a Mermaid diagram rendered in place](docs/images/files.png)
+
+</details>
+
 ## Requirements
 
-- An AI-DLC workflow (the dashboard reads its `aidlc/` folder) — any harness: Kiro IDE, Kiro CLI or Claude Code
+- An AI-DLC workflow (the dashboard reads its `aidlc/` folder, or `aidlc-docs/` for v1) — any harness: Kiro IDE, Kiro CLI or Claude Code
 - Standalone HTML: a Chromium-based browser (File System Access API)
 - Extension: Kiro IDE or VS Code ≥ 1.80
 - Web server: Node.js ≥ 18 and any modern browser (no File System Access API needed)

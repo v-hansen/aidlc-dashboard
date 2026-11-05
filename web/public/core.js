@@ -56,17 +56,55 @@ function setLang(l) {
     document.getElementById('app').innerHTML = renderLoadScreen();
   }
 }
+// Tema claro/escuro: escolha salva > tema do editor (webview) > preferência do SO
+function detectTheme() {
+  try {
+    const saved = localStorage.getItem('aidlc-dash-theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch {}
+  const b = typeof document !== 'undefined' && document.body;
+  if (b && b.classList) {
+    if (b.classList.contains('vscode-light')) return 'light';
+    if (b.classList.contains('vscode-dark') || b.classList.contains('vscode-high-contrast')) return 'dark';
+  }
+  try { if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) return 'light'; } catch {}
+  return 'dark';
+}
+let theme = 'dark';
+function applyTheme(th) {
+  theme = th === 'light' ? 'light' : 'dark';
+  if (typeof document !== 'undefined' && document.documentElement) document.documentElement.dataset.theme = theme;
+}
+function setTheme(th) {
+  applyTheme(th);
+  try { localStorage.setItem('aidlc-dash-theme', theme); } catch {}
+  if (dashboardData) {
+    document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+    switchTab(activeTab);
+  } else {
+    document.getElementById('app').innerHTML = renderLoadScreen();
+  }
+}
+if (typeof document !== 'undefined') {
+  applyTheme(detectTheme());
+  // o body da webview só existe após o parse: reavalia quando o DOM estiver pronto
+  if (document.readyState === 'loading' && document.addEventListener) {
+    document.addEventListener('DOMContentLoaded', () => applyTheme(detectTheme()));
+  }
+}
 function renderLangSelector() {
+  const next = theme === 'light' ? 'dark' : 'light';
+  const label = t(next === 'light' ? 'themeToLight' : 'themeToDark');
   return '<div class="lang-bar">' + [['pt','PT'],['en','EN'],['es','ES']].map(([l,label]) =>
     `<button class="lang-btn ${l===lang?'selected':''}" onclick="setLang('${l}')">${label}</button>`
-  ).join('') + '</div>';
+  ).join('') + `<button class="theme-btn" onclick="setTheme('${next}')" title="${esc(label)}" aria-label="${esc(label)}">${next === 'light' ? '☀' : '☾'}</button></div>`;
 }
 
 ;
 
 // PART 1: Data structures and constants
 // Substituído pelo build.js com a versão do aidlc-dashboard-extension/package.json
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.1';
 
 const PHASES = [
   { id:'initialization', stages:['workspace-scaffold','workspace-detection','state-init'] },
@@ -317,6 +355,20 @@ async function loadDashboardData(rootHandle) {
       if (parsed && typeof parsed === 'object') { data.scopeGrid = parsed; data.scopeGridSource = cand; break; }
     }
   }
+  // Grafo de stages compilado (stage-graph.json, ao lado do scope-grid.json): traz nome,
+  // agente líder e de apoio, ALWAYS/CONDITIONAL, condição e dependências de cada stage da
+  // versão instalada. A aba Workflow usa isso no lugar dos valores embutidos.
+  for (const cand of gridCandidates.map(c => c.replace('scope-grid.json', 'stage-graph.json'))) {
+    const f = await findFile(rootHandle, cand);
+    if (f) {
+      const parsed = safeJsonParse(await readFileFromHandle(f));
+      if (parsed && typeof parsed === 'object') { data.stageGraph = parsed; data.stageGraphSource = cand; break; }
+    }
+  }
+  if (!data.stageGraph && dashboardData && dashboardData.stageGraph) {
+    data.stageGraph = dashboardData.stageGraph;
+    data.stageGraphSource = dashboardData.stageGraphSource;
+  }
   // Preserva o grid do ciclo anterior se este ciclo não achou (arquivo em escrita)
   if (!data.scopeGrid && dashboardData && dashboardData.scopeGrid) {
     data.scopeGrid = dashboardData.scopeGrid;
@@ -332,10 +384,19 @@ async function loadDashboardData(rootHandle) {
 function parseState(stateMarkdown) {
   if (!stateMarkdown) return {};
   const s = {};
+  // Lê "- **Key**: value" só na mesma linha: um campo vazio (ex.: "**Worktree Path**:")
+  // não pode roubar o valor da linha seguinte.
   const getVal = (key) => {
-    const rx = new RegExp(`\\*\\*${key}\\*\\*:\\s*(.+)`);
+    const rx = new RegExp(`\\*\\*${key}\\*\\*:[ \\t]*([^\\n]*)`);
     const m = stateMarkdown.match(rx);
     return m ? m[1].trim() : '';
+  };
+  // "off (from scope feature)" -> { value: 'off', source: 'from scope feature' }
+  const getSetting = (key) => {
+    const raw = getVal(key);
+    if (!raw) return null;
+    const m = raw.match(/^([^()]*?)\s*(?:\(([^)]*)\))?\s*$/);
+    return { value: (m ? m[1] : raw).trim(), source: (m && m[2] ? m[2] : '').trim() };
   };
   s.project = getVal('Project');
   s.projectType = getVal('Project Type');
@@ -354,6 +415,22 @@ function parseState(stateMarkdown) {
   s.lastUpdated = getVal('Last Updated');
   s.lastCompletedStage = getVal('Last Completed Stage');
   s.nextAction = getVal('Next Action');
+  // Campos por trabalho da v2.6+ (State Version 8). Ausentes em estados antigos.
+  s.stateVersion = getVal('State Version');
+  s.plan = getVal('Plan');
+  s.projectTypeSource = getVal('Project Type Source');
+  s.settings = {};
+  for (const [k, label] of [['guardPolicy', 'Guard Policy'], ['planApproval', 'Plan Approval'], ['collaborators', 'Collaborators'],
+    ['sensors', 'Sensors'], ['learnings', 'Learnings'], ['summaryConfirmation', 'Summary Confirmation'],
+    ['guardsOff', 'Guards Off'], ['guardsOn', 'Guards On'], ['changeControl', 'Change Control']]) {
+    const v = getSetting(label);
+    if (v && v.value) s.settings[k] = v;
+  }
+  s.constructionIteration = getVal('Construction Iteration');
+  s.constructionExecution = getVal('Construction Execution');
+  s.unitOwnership = getVal('Unit Ownership');
+  s.autonomyMode = getVal('Construction Autonomy Mode');
+  s.revisionCount = getVal('Revision Count');
 
   // Parse phase progress
   s.phases = {};
@@ -368,12 +445,21 @@ function parseState(stateMarkdown) {
 
   // Parse stage progress (checkboxes) — aceita —, – ou - como separador
   s.stages = {};
-  const stageRx = /- \[(.)\] (\S+) [—–-] (\w+)/g;
+  // Linha: "- [x] slug — EXECUTE" ou "- [ ] slug — SKIP: motivo". O motivo é opcional.
+  const stageRx = /- \[(.)\] (\S+) [—–-] (\w+)(?:[ \t]*[:—–-][ \t]*([^\n]*))?/g;
   let sm;
   while ((sm = stageRx.exec(stateMarkdown))) {
     const status = sm[1] === 'x' ? 'done' : sm[1] === '-' ? 'active' : sm[1] === '?' ? 'awaiting' : sm[1] === 'R' ? 'revising' : sm[1] === 'S' ? 'skipped' : 'pending';
     const action = sm[3]; // EXECUTE or SKIP
-    s.stages[sm[2]] = { status, action };
+    s.stages[sm[2]] = { status, action, reason: (sm[4] || '').trim() };
+  }
+  // Motivos de skip que a v2 grava em "Stages to Skip": "1.2 (market-research), 2.1 (reverse-engineering — greenfield)"
+  const skipLine = getVal('Stages to Skip');
+  if (skipLine) {
+    for (const m of skipLine.matchAll(/\(([a-z0-9-]+)\s*(?:[—–-]\s*([^)]*))?\)/g)) {
+      const st = s.stages[m[1]];
+      if (st && !st.reason && m[2]) st.reason = m[2].trim();
+    }
   }
   return s;
 }
@@ -752,7 +838,10 @@ function renderAuditTab(intent) {
   const recent = events.slice(-40);
   for (const ev of recent) {
     const key = 'ev' + ev.event;
-    const label = (I18N[lang]?.[key] ?? I18N.en?.[key]) || `📋 ${esc(ev.event)}`;
+    // A v2.11 tem 115 tipos de evento; os sem tradução viram texto legível
+    // ("GUARD_POLICY_SET" -> "Guard policy set") com o código original no tooltip.
+    const human = String(ev.event || '').toLowerCase().replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+    const label = (I18N[lang]?.[key] ?? I18N.en?.[key]) || `📋 <span title="${esc(ev.event)}">${esc(human)}</span>`;
     const detail = detailFor(ev.fields);
     html += `
       <div class="timeline-event">
@@ -787,7 +876,7 @@ function renderHelpTab() {
             .map(s => {
               const n = scopeExecCount(s, grid);
               const g = scopeGateCount(s, grid);
-              return `<div class="knowledge-item" style="text-align:center" title="${esc((SCOPE_META[s]||{}).desc || '')}"><strong>${esc(s)}</strong><br><small style="color:var(--text-muted)">${n} ${t('wfStagesRun')} · ${g} ${t('wfGates')}</small></div>`;
+              return `<div class="knowledge-item" style="text-align:center" title="${esc(scopeDesc(s))}"><strong>${esc(s)}</strong><br><small style="color:var(--text-muted)">${n} ${t('wfStagesRun')} · ${g} ${t('wfGates')}</small></div>`;
             }).join('');
         })()}
       </div>
@@ -1464,12 +1553,13 @@ Object.assign(I18N.pt = I18N.pt || {}, {
   tabWorkflow:'Workflow',
   tabFiles:'Arquivos', fbEmpty:'Nenhum arquivo legível nesta pasta.', fbPick:'Selecione um arquivo à esquerda para ler.',
   wfTitle:'🗺️ Formato do workflow por scope',
-  wfSub:'Mostra quais das 33 stages rodam de acordo com o scope. As esmaecidas são puladas (o doctor ainda as valida, só não executam).',
+  wfSub:'Mostra quais das 33 stages rodam de acordo com o scope. As riscadas (borda tracejada) são puladas (o doctor ainda as valida, só não executam).',
   wfRealScope:'Scope real deste workflow', wfIsReal:'Este é o scope em execução:', wfNotReal:'Prévia — o scope real é "{real}".',
   wfOf:'de', wfStagesRun:'stages rodam',
   wfGates:'gates', wfComposed:'composto', wfGridSrc:'Grid de scopes: {src}',
   wfComposedDesc:'Scope composto/custom — grade derivada do estado do workflow',
-  wfVGate:'Verification Gate {n}', wfVGateTip:'Gate de verificação de fronteira de fase', wfVGateLeg:'gate de verificação entre fases',
+  wfVGate:'Verification Gate {n}', wfVGateTip:'Gate de verificação de fronteira de fase', wfVGateLeg:'gate de verificação entre fases', wfHover:'Passe o mouse (ou use Tab) num card para destacar do que ele depende e o que depende dele.', wfLegEdge:'depende de (só stages que executam)', themeToLight:'Usar tema claro', themeToDark:'Usar tema escuro',
+  wfLead:"Agente líder", wfSupport:"Agentes de apoio", wfReason:"Motivo", wfAddedTip:"Incluída neste trabalho (fora do padrão do scope {scope})", wfRemovedTip:"Pulada neste trabalho (o padrão do scope {scope} roda esta stage)", wfChangedLeg:"diferente do padrão do scope", wfChangedNote:"{n} stage(s) diferem do padrão do scope {scope} ({stock} no padrão): o estado deste trabalho manda.", wfPlan:"Plano", wfAwaiting:"aguardando sua aprovação", wfRevising:"em revisão", wfAttnAwaiting:"Aguardando sua aprovação:", wfAttnRevising:"Em revisão depois de pedido de mudança:", wfRevCount:"revisão {n} de 3", wfArchived:"Este trabalho está arquivado.", wfSettingsTitle:"Configuração deste trabalho", wfSrcScope:"padrão do scope {scope}", wfSrcYou:"definido por você", wfSrcCmd:"definido por comando", wfSrcScan:"detectado no workspace", wfOn:"ligado", wfOff:"desligado", wfSetPlan:"Plano", wfSetPlanTip:"Plano montado só para este trabalho (--skip/--add ou /aidlc compose)", wfSetGuard:"Guard Policy", wfSetGuardTip:"Quão de perto o AI-DLC confere mudanças: strict, relaxed ou off (/aidlc --guard-policy)", wfSetPlanApproval:"Plan Approval", wfSetPlanApprovalTip:"O engine pede uma vez a aprovação do plano da Construction (/aidlc --plan-approval on|off)", wfSetCollab:"Colaboradores", wfSetCollabTip:"Desligado: cada stage roda só com o agente líder. Ligado: os agentes de apoio entram (/aidlc --collaborators)", wfSetSensors:"Sensores", wfSetSensorsTip:"Checagens automáticas nos gates (/aidlc --sensors)", wfSetLearnings:"Aprendizados", wfSetLearningsTip:"Regras aprendidas viram memória do projeto (/aidlc --learnings)", wfSetSummary:"Confirmação de resumo", wfSetSummaryTip:"Pede confirmação do resumo antes de seguir (/aidlc --summary-confirmation)", wfSetGuardsOff:"Proteções desligadas", wfSetGuardsOffTip:"Proteções baixadas só para este trabalho", wfSetGuardsOn:"Proteções forçadas", wfSetGuardsOnTip:"Proteções ligadas acima da Guard Policy", wfSetProjectType:"Tipo de projeto", wfSetConstruction:"Construction", wfSetConstructionTip:"Iteração (unit-major/stage-major), execução (serial/swarm) e dono das units",
   wfLegExec:'EXECUTE neste scope', wfLegSkip:'SKIP, fora do scope', wfLegDone:'concluída (estado real)', wfLegCurrent:'stage atual (estado real)',
   badgeRunning:'Em Execução', badgeCompleted:'Concluído', badgePaused:'Pausado', badgeFailed:'Falhou', badgeUnknown:'Desconhecido',
   phDone:'Concluída', phActive:'Ativa', phPending:'Pendente', phSkipped:'Pulada',
@@ -1562,12 +1652,13 @@ Object.assign(I18N.en = I18N.en || {}, {
   tabWorkflow:'Workflow',
   tabFiles:'Files', fbEmpty:'No readable files in this folder.', fbPick:'Select a file on the left to read it.',
   wfTitle:'🗺️ Workflow shape per scope',
-  wfSub:'Shows which of the 33 stages run for each scope. Dimmed ones are skipped (the doctor still validates them, they just do not execute).',
+  wfSub:'Shows which of the 33 stages run for each scope. Struck-through ones (dashed border) are skipped (the doctor still validates them, they just do not execute).',
   wfRealScope:'This workflow\'s actual scope', wfIsReal:'This is the running scope:', wfNotReal:'Preview — the actual scope is "{real}".',
   wfOf:'of', wfStagesRun:'stages run',
   wfGates:'gates', wfComposed:'composed', wfGridSrc:'Scope grid: {src}',
   wfComposedDesc:'Composed/custom scope — grid derived from the workflow state',
-  wfVGate:'Verification Gate {n}', wfVGateTip:'Phase-boundary verification gate', wfVGateLeg:'phase verification gate',
+  wfVGate:'Verification Gate {n}', wfVGateTip:'Phase-boundary verification gate', wfVGateLeg:'phase verification gate', wfHover:'Hover (or Tab to) a card to highlight what it depends on and what depends on it.', wfLegEdge:'depends on (executing stages only)', themeToLight:'Switch to light theme', themeToDark:'Switch to dark theme',
+  wfLead:"Lead agent", wfSupport:"Support agents", wfReason:"Reason", wfAddedTip:"Added for this work (not in the {scope} scope default)", wfRemovedTip:"Skipped for this work (the {scope} scope default runs this stage)", wfChangedLeg:"differs from the scope default", wfChangedNote:"{n} stage(s) differ from the {scope} scope default ({stock} by default): this work's state wins.", wfPlan:"Plan", wfAwaiting:"awaiting your approval", wfRevising:"revising", wfAttnAwaiting:"Awaiting your approval:", wfAttnRevising:"Revising after a change request:", wfRevCount:"revision {n} of 3", wfArchived:"This work is archived.", wfSettingsTitle:"Settings for this work", wfSrcScope:"{scope} scope default", wfSrcYou:"set by you", wfSrcCmd:"set by a command", wfSrcScan:"detected in the workspace", wfOn:"on", wfOff:"off", wfSetPlan:"Plan", wfSetPlanTip:"A plan built for this work only (--skip/--add or /aidlc compose)", wfSetGuard:"Guard Policy", wfSetGuardTip:"How closely AI-DLC checks changes: strict, relaxed or off (/aidlc --guard-policy)", wfSetPlanApproval:"Plan Approval", wfSetPlanApprovalTip:"The engine asks once for approval of the Construction plan (/aidlc --plan-approval on|off)", wfSetCollab:"Collaborators", wfSetCollabTip:"Off: each stage runs with its lead agent only. On: support agents join (/aidlc --collaborators)", wfSetSensors:"Sensors", wfSetSensorsTip:"Automatic checks at the gates (/aidlc --sensors)", wfSetLearnings:"Learnings", wfSetLearningsTip:"Learned rules become project memory (/aidlc --learnings)", wfSetSummary:"Summary confirmation", wfSetSummaryTip:"Asks you to confirm the summary before moving on (/aidlc --summary-confirmation)", wfSetGuardsOff:"Guards off", wfSetGuardsOffTip:"Fences lowered for this work only", wfSetGuardsOn:"Guards on", wfSetGuardsOnTip:"Fences forced on above the Guard Policy", wfSetProjectType:"Project type", wfSetConstruction:"Construction", wfSetConstructionTip:"Iteration (unit-major/stage-major), execution (serial/swarm) and unit ownership",
   wfLegExec:'EXECUTE in this scope', wfLegSkip:'SKIP, out of scope', wfLegDone:'done (live state)', wfLegCurrent:'current stage (live state)',
   badgeRunning:'Running', badgeCompleted:'Completed', badgePaused:'Paused', badgeFailed:'Failed', badgeUnknown:'Unknown',
   phDone:'Completed', phActive:'Active', phPending:'Pending', phSkipped:'Skipped',
@@ -1660,12 +1751,13 @@ Object.assign(I18N.es = I18N.es || {}, {
   tabWorkflow:'Workflow',
   tabFiles:'Archivos', fbEmpty:'Ningún archivo legible en esta carpeta.', fbPick:'Selecciona un archivo a la izquierda para leerlo.',
   wfTitle:'🗺️ Formato del workflow por scope',
-  wfSub:'Muestra cuáles de las 33 stages corren según el scope. Las atenuadas se omiten (el doctor aún las valida, solo no se ejecutan).',
+  wfSub:'Muestra cuáles de las 33 stages corren según el scope. Las tachadas (borde punteado) se omiten (el doctor aún las valida, solo no se ejecutan).',
   wfRealScope:'Scope real de este workflow', wfIsReal:'Este es el scope en ejecución:', wfNotReal:'Vista previa — el scope real es "{real}".',
   wfOf:'de', wfStagesRun:'stages corren',
   wfGates:'gates', wfComposed:'compuesto', wfGridSrc:'Grid de scopes: {src}',
   wfComposedDesc:'Scope compuesto/custom — grid derivado del estado del workflow',
-  wfVGate:'Verification Gate {n}', wfVGateTip:'Gate de verificación de frontera de fase', wfVGateLeg:'gate de verificación entre fases',
+  wfVGate:'Verification Gate {n}', wfVGateTip:'Gate de verificación de frontera de fase', wfVGateLeg:'gate de verificación entre fases', wfHover:'Pasa el mouse (o usa Tab) sobre una tarjeta para resaltar de qué depende y qué depende de ella.', wfLegEdge:'depende de (solo stages que se ejecutan)', themeToLight:'Usar tema claro', themeToDark:'Usar tema oscuro',
+  wfLead:"Agente líder", wfSupport:"Agentes de apoyo", wfReason:"Motivo", wfAddedTip:"Incluida en este trabajo (fuera del estándar del scope {scope})", wfRemovedTip:"Omitida en este trabajo (el estándar del scope {scope} ejecuta esta etapa)", wfChangedLeg:"distinta del estándar del scope", wfChangedNote:"{n} etapa(s) difieren del estándar del scope {scope} ({stock} en el estándar): manda el estado de este trabajo.", wfPlan:"Plan", wfAwaiting:"esperando tu aprobación", wfRevising:"en revisión", wfAttnAwaiting:"Esperando tu aprobación:", wfAttnRevising:"En revisión tras un pedido de cambios:", wfRevCount:"revisión {n} de 3", wfArchived:"Este trabajo está archivado.", wfSettingsTitle:"Configuración de este trabajo", wfSrcScope:"estándar del scope {scope}", wfSrcYou:"definido por ti", wfSrcCmd:"definido por un comando", wfSrcScan:"detectado en el workspace", wfOn:"activado", wfOff:"desactivado", wfSetPlan:"Plan", wfSetPlanTip:"Plan armado solo para este trabajo (--skip/--add o /aidlc compose)", wfSetGuard:"Guard Policy", wfSetGuardTip:"Qué tan de cerca AI-DLC revisa los cambios: strict, relaxed u off (/aidlc --guard-policy)", wfSetPlanApproval:"Plan Approval", wfSetPlanApprovalTip:"El engine pide una vez la aprobación del plan de Construction (/aidlc --plan-approval on|off)", wfSetCollab:"Colaboradores", wfSetCollabTip:"Desactivado: cada etapa corre solo con su agente líder. Activado: entran los agentes de apoyo (/aidlc --collaborators)", wfSetSensors:"Sensores", wfSetSensorsTip:"Verificaciones automáticas en los gates (/aidlc --sensors)", wfSetLearnings:"Aprendizajes", wfSetLearningsTip:"Las reglas aprendidas pasan a la memoria del proyecto (/aidlc --learnings)", wfSetSummary:"Confirmación del resumen", wfSetSummaryTip:"Pide confirmar el resumen antes de seguir (/aidlc --summary-confirmation)", wfSetGuardsOff:"Protecciones desactivadas", wfSetGuardsOffTip:"Protecciones bajadas solo para este trabajo", wfSetGuardsOn:"Protecciones forzadas", wfSetGuardsOnTip:"Protecciones activadas por encima de la Guard Policy", wfSetProjectType:"Tipo de proyecto", wfSetConstruction:"Construction", wfSetConstructionTip:"Iteración (unit-major/stage-major), ejecución (serial/swarm) y dueño de las units",
   wfLegExec:'EXECUTE en este scope', wfLegSkip:'SKIP, fuera del scope', wfLegDone:'completada (estado real)', wfLegCurrent:'stage actual (estado real)',
   badgeRunning:'En Ejecución', badgeCompleted:'Completado', badgePaused:'Pausado', badgeFailed:'Falló', badgeUnknown:'Desconocido',
   phDone:'Completada', phActive:'Activa', phPending:'Pendiente', phSkipped:'Omitida',
@@ -1820,8 +1912,9 @@ const STAGE_DESC_ES = {
 ;
 
 // PART 21: Workflow-shape graph — mostra o formato do workflow do scope
-// que está rodando (não fixo). Fonte: matriz stage-by-scope do AI-DLC 2.0 GA
-// (docs/guide/05-scopes-and-depth.md). 5 colunas × 33 stages.
+// que está rodando (não fixo). Fonte: matriz stage-by-scope do AI-DLC
+// (docs/guide/05-scopes-and-depth.md), conferida célula a célula com a 2.11.0. 5 colunas × 33 stages.
+// No scope em execução, EXECUTE/SKIP vem do aidlc-state.md deste trabalho.
 //
 // O grafo default reflete o scope do intent selecionado (state.scope) e marca
 // como concluídas as stages com checkbox [x] no aidlc-state.md. Chips permitem
@@ -1854,18 +1947,25 @@ function wfCols() {
 
 // Descrição one-line de cada scope (o que ele roda). N EXECUTE derivado do grid.
 const SCOPE_META = {
-  enterprise:      { desc:'Rigor máximo: toda stage, todo gate, trilha de auditoria completa' },
-  feature:         { desc:'O padrão full-lifecycle: todas as 33 stages', tag:'(everything)' },
-  mvp:             { desc:'Entrega o core greenfield: pula a fase de operação' },
-  poc:             { desc:'Prova uma ideia rápido: intent, depois direto pra código e teste' },
-  bugfix:          { desc:'Corrige e faz deploy de um defeito específico' },
-  refactor:        { desc:'Reestrutura código existente sem mudar comportamento' },
-  infra:           { desc:'Mudança de infra: arquitetura, IaC, provisioning e observability' },
-  'security-patch':{ desc:'Resposta a CVE: caminho rápido pelas stages de segurança' },
-  classic:         { desc:'Estilo v1: Inception + Construction (sem Ideation, CI Pipeline e Operation)' },
-  workshop:        { desc:'Sessão facilitada/treinamento com o lifecycle completo pós-Ideation' },
-  express:         { desc:'O caminho mais leve: requisitos → código → deploy condicional, sem design' }
+  enterprise:      { desc:{ pt:"Rigor máximo: toda stage, todo gate, trilha de auditoria completa", en:"Maximum rigor: every stage, every gate, full audit trail", es:"Máximo rigor: todas las etapas, todos los gates, auditoría completa" } },
+  feature:         { desc:{ pt:"O padrão full-lifecycle: todas as 33 stages", en:"The full-lifecycle default: all 33 stages", es:"El estándar de ciclo completo: las 33 etapas" }, tag:'(everything)' },
+  mvp:             { desc:{ pt:"Entrega o core greenfield: pula a fase de operação", en:"Ships the greenfield core: skips the Operation phase", es:"Entrega el núcleo greenfield: omite la fase de operación" } },
+  poc:             { desc:{ pt:"Prova uma ideia rápido: intent, depois direto pra código e teste", en:"Proves an idea fast: intent, then straight to code and test", es:"Prueba una idea rápido: intent y luego directo a código y pruebas" } },
+  bugfix:          { desc:{ pt:"Corrige e faz deploy de um defeito específico", en:"Fixes and deploys a specific defect", es:"Corrige y despliega un defecto específico" } },
+  refactor:        { desc:{ pt:"Reestrutura código existente sem mudar comportamento", en:"Restructures existing code without changing behavior", es:"Reestructura código existente sin cambiar el comportamiento" } },
+  infra:           { desc:{ pt:"Mudança de infra: arquitetura, IaC, provisioning e observability", en:"Infrastructure change: architecture, IaC, provisioning and observability", es:"Cambio de infraestructura: arquitectura, IaC, provisioning y observability" } },
+  'security-patch':{ desc:{ pt:"Resposta a CVE: caminho rápido pelas stages de segurança", en:"CVE response: fast path through the security stages", es:"Respuesta a CVE: camino rápido por las etapas de seguridad" } },
+  classic:         { desc:{ pt:"Estilo v1: Inception + Construction (sem Ideation, CI Pipeline e Operation)", en:"v1 style: Inception + Construction (no Ideation, CI Pipeline or Operation)", es:"Estilo v1: Inception + Construction (sin Ideation, CI Pipeline ni Operation)" } },
+  workshop:        { desc:{ pt:"Sessão facilitada/treinamento com o lifecycle completo pós-Ideation", en:"Facilitated session or training with the full post-Ideation lifecycle", es:"Sesión facilitada o capacitación con el ciclo completo posterior a Ideation" } },
+  express:         { desc:{ pt:"O caminho mais leve: requisitos → código → deploy condicional, sem design", en:"The lightest path: requirements → code → conditional deploy, no design", es:"El camino más liviano: requisitos → código → deploy condicional, sin diseño" } }
 };
+
+// Descrição do scope no idioma ativo (scopes compostos guardam uma string já traduzida).
+function scopeDesc(scope) {
+  const d = (SCOPE_META[scope] || {}).desc;
+  if (!d) return '';
+  return typeof d === 'string' ? d : (d[lang] || d.en || '');
+}
 
 // Matriz stage-by-scope oficial (✓ = EXECUTE). Ausente = SKIP.
 // Base: docs/guide/05-scopes-and-depth.md (AI-DLC 2.0 GA, 33 stages).
@@ -1906,8 +2006,11 @@ function buildScopeGrid() {
   const ext = (typeof dashboardData !== 'undefined' && dashboardData && dashboardData.scopeGrid) || null;
   if (ext) {
     const table = ext.scopes && typeof ext.scopes === 'object' ? ext.scopes : ext;
-    for (const [scope, membership] of Object.entries(table)) {
-      if (!membership || typeof membership !== 'object') continue;
+    for (const [scope, entry] of Object.entries(table)) {
+      if (!entry || typeof entry !== 'object') continue;
+      // v2.x compila { scope: { stages: { slug: 'EXECUTE'|'SKIP' } } }; formatos antigos
+      // e scopes compostos podem vir planos ({ scope: { slug: ... } }).
+      const membership = entry.stages && typeof entry.stages === 'object' ? entry.stages : entry;
       const row = {};
       for (const slug of allSlugs) {
         const v = membership[slug];
@@ -1937,6 +2040,41 @@ function buildScopeGrid() {
     }
   } catch {}
   return grid;
+}
+
+// Grafo de stages compilado pela versão instalada (stage-graph.json). Retorna
+// { slug: node } ou null. Aceita array ou objeto indexado ("0","1",...).
+function stageGraphMap() {
+  const g = (typeof dashboardData !== 'undefined' && dashboardData && dashboardData.stageGraph) || null;
+  if (!g || typeof g !== 'object') return null;
+  const nodes = Array.isArray(g) ? g : (Array.isArray(g.stages) ? g.stages : Object.values(g));
+  const map = {};
+  for (const n of nodes) if (n && typeof n === 'object' && typeof n.slug === 'string') map[n.slug] = n;
+  return Object.keys(map).length ? map : null;
+}
+// Dependências: do grafo instalado (requires_stage) quando existe; senão as embutidas.
+function wfEdges() {
+  const gm = stageGraphMap();
+  if (!gm) return WF_EDGES;
+  const known = new Set(PHASES.flatMap(p => p.stages));
+  const edges = [];
+  for (const [slug, n] of Object.entries(gm)) {
+    for (const dep of (Array.isArray(n.requires_stage) ? n.requires_stage : [])) {
+      if (known.has(dep) && known.has(slug)) edges.push([dep, slug]);
+    }
+  }
+  return edges.length ? edges : WF_EDGES;
+}
+// Texto do tooltip do card: condição + agentes, do grafo instalado quando existe.
+function wfStageTip(slug) {
+  const n = (stageGraphMap() || {})[slug];
+  const parts = [stageDesc(slug)];
+  if (n) {
+    if (n.execution) parts.push(`${n.execution}${n.condition ? ': ' + n.condition : ''}`);
+    if (n.lead_agent) parts.push(`${t('wfLead')}: ${n.lead_agent}`);
+    if (Array.isArray(n.support_agents) && n.support_agents.length) parts.push(`${t('wfSupport')}: ${n.support_agents.join(', ')}`);
+  }
+  return parts.filter(Boolean).join('\n');
 }
 
 // Compat: SCOPE_GRID continua existindo como o grid base (usado pelos testes e como
@@ -1983,6 +2121,7 @@ const WF_EDGES = [
 
 // scope escolhido na aba (por intent). Default = scope real do estado.
 let wfScope = null;
+let wfActiveGrid = null; // grid efetivo do último render (estado real quando é o scope em execução)
 let wfScopeIntent = null; // dirName do intent cujo wfScope está setado (persiste entre refreshes)
 
 function renderWorkflowTab(state) {
@@ -1997,10 +2136,27 @@ function renderWorkflowTab(state) {
     wfScopeIntent = intentKey;
   }
   const active = wfScope;
-  const activeGrid = grid[active] || grid.feature;
+  const stockGrid = grid[active] || grid.feature;
   const isReal = active === realScope;
 
   const stageStatus = slug => state.stages?.[slug]?.status || null;
+  // No scope em execução, o que roda é o que o aidlc-state.md diz para ESTE trabalho:
+  // um plano sob medida (--skip/--add), um skip de reverse-engineering em greenfield ou
+  // um /aidlc skip mudam o grid padrão do scope. Fora dele, os chips mostram o padrão.
+  const liveKnown = isReal && state.stages && Object.keys(state.stages).length >= 3;
+  const activeGrid = {};
+  const changedSlugs = new Set();
+  for (const slug of PHASES.flatMap(p => p.stages)) {
+    const st = state.stages?.[slug];
+    let v = stockGrid[slug] || 'SKIP';
+    if (liveKnown && st) {
+      if (st.status === 'skipped' || st.action === 'SKIP') v = 'SKIP';
+      else if (st.action === 'EXECUTE') v = 'EXECUTE';
+    }
+    activeGrid[slug] = v;
+    if (liveKnown && st && v !== (stockGrid[slug] || 'SKIP')) changedSlugs.add(slug);
+  }
+  wfActiveGrid = activeGrid;
 
   // chips ordenados por nº de stages (inclui scopes externos/compostos)
   const order = Object.keys(grid).sort((a, b) => scopeExecCount(a, grid) - scopeExecCount(b, grid));
@@ -2020,22 +2176,33 @@ function renderWorkflowTab(state) {
       const st = exec ? stageStatus(slug) : null;
       let cls = exec ? 'exec ' + col.key : 'skip';
       if (isReal && exec && st === 'done') cls += ' done';
+      else if (isReal && exec && st === 'awaiting') cls += ' awaiting';
+      else if (isReal && exec && st === 'revising') cls += ' revising';
       else if (isReal && exec && st === 'active') cls += ' current';
-      return `<div class="wf-card ${cls}" data-slug="${esc(slug)}" title="${esc(stageDesc(slug))}">
-        <div class="wf-num">${colIdx}.${si + 1}</div>
-        <div class="wf-name">${esc(WF_STAGE_LABEL[slug] || slug)}</div>
+      const changed = changedSlugs.has(slug);
+      if (changed) cls += ' changed';
+      const reason = isReal ? (state.stages?.[slug]?.reason || '') : '';
+      const tip = [wfStageTip(slug),
+        changed ? tf(exec ? 'wfAddedTip' : 'wfRemovedTip', { scope: active }) : '',
+        reason ? `${t('wfReason')}: ${reason}` : ''].filter(Boolean).join('\n');
+      const badge = changed ? `<span class="wf-chg" aria-label="${esc(t('wfChangedLeg'))}">${exec ? '+' : '−'}</span>` : '';
+      const stLabel = isReal && exec && (st === 'awaiting' || st === 'revising') ? `<div class="wf-st">${esc(t(st === 'awaiting' ? 'wfAwaiting' : 'wfRevising'))}</div>` : '';
+      return `<div class="wf-card ${cls}" data-slug="${esc(slug)}" title="${esc(tip)}" tabindex="0">
+        <div class="wf-num">${colIdx}.${si + 1}${badge}</div>
+        <div class="wf-name">${esc(WF_STAGE_LABEL[slug] || (stageGraphMap() || {})[slug]?.name || slug)}</div>${stLabel}
       </div>`;
     }).join('');
     // marcador de verification gate no rodapé da coluna que fecha uma fronteira
     const vg = VG_AFTER[col.key]
       ? `<div class="wf-vgate" title="${t('wfVGateTip')}">◈ ${tf('wfVGate', { n: VG_AFTER[col.key] })}</div>`
       : '';
-    return `<div class="wf-col"><div class="wf-col-title">${esc(col.title)}</div>${cards}${vg}</div>`;
+    return `<div class="wf-col" data-phase="${esc(col.key)}"><div class="wf-col-title">${esc(col.title)}</div>${cards}${vg}</div>`;
   }).join('');
 
-  const n = scopeExecCount(active, grid);
-  const gates = scopeGateCount(active, grid);
-  const meta = SCOPE_META[active] || {};
+  const n = Object.values(activeGrid).filter(v => v === 'EXECUTE').length;
+  const gates = Object.entries(activeGrid).filter(([slug, v]) => v === 'EXECUTE' && !WF_INLINE_NOGATE.has(slug)).length;
+  const changedNote = changedSlugs.size
+    ? `<div class="wf-changed-note">${tf('wfChangedNote', { n: changedSlugs.size, scope: esc(active), stock: scopeExecCount(active, grid) })}${state.plan ? ` · ${t('wfPlan')}: <b>${esc(state.plan)}</b>` : ''}</div>` : '';
   const composedNote = SCOPE_GRID_BASE[active] ? '' : ` <span class="wf-hint">(${t('wfComposed')})</span>`;
   const realLine = isReal
     ? `<strong>${t('wfIsReal')}</strong> `
@@ -2044,17 +2211,21 @@ function renderWorkflowTab(state) {
     ? `<div class="wf-src">${tf('wfGridSrc', { src: esc(dashboardData.scopeGridSource) })}</div>` : '';
 
   const gridHtml = `
+    ${renderWorkAttention(state)}
+    ${renderWorkSettings(state)}
     <div class="wf-head">
       <h3 class="wf-title">${t('wfTitle')}</h3>
       <p class="wf-sub">${t('wfSub')}</p>
     </div>
     <div class="wf-chips">${chips}</div>
+    <p class="wf-hint-hover">${t('wfHover')}</p>
     <div class="wf-board-wrap" id="wf-board-wrap">
       <svg class="wf-edges" id="wf-edges" aria-hidden="true"></svg>
       <div class="wf-board" id="wf-board">${board}</div>
     </div>
     <div class="wf-caption">
-      ${realLine}<b>${esc(active)}</b>${composedNote} · ${esc(meta.desc || '')}. <b>${n} ${t('wfOf')} 33</b> ${t('wfStagesRun')} · <b>${gates}</b> ${t('wfGates')}.
+      ${realLine}<b>${esc(active)}</b>${composedNote} · ${esc(scopeDesc(active))}. <b>${n} ${t('wfOf')} 33</b> ${t('wfStagesRun')} · <b>${gates}</b> ${t('wfGates')}.
+      ${changedNote}
       ${srcLine}
     </div>
     <div class="wf-legend">
@@ -2062,6 +2233,9 @@ function renderWorkflowTab(state) {
       <span><span class="wf-swatch skip"></span>${t('wfLegSkip')}</span>
       <span><span class="wf-swatch done"></span>${t('wfLegDone')}</span>
       <span><span class="wf-swatch current"></span>${t('wfLegCurrent')}</span>
+      <span><span class="wf-swatch awaiting"></span>${t('wfAwaiting')}</span>
+      ${changedSlugs.size ? `<span><span class="wf-chg">±</span> ${t('wfChangedLeg')}</span>` : ''}
+      <span><span class="wf-edge-sw"></span>${t('wfLegEdge')}</span>
       <span>◈ ${t('wfVGateLeg')}</span>
     </div>
   `;
@@ -2083,6 +2257,52 @@ function renderWorkflowTab(state) {
   return ubHtml + gridHtml;
 }
 
+// Faixa "precisa de você": gates abertos ([?]) e stages em revisão ([R]) do estado.
+function renderWorkAttention(state) {
+  const rows = Object.entries(state.stages || {});
+  const awaiting = rows.filter(([, v]) => v.status === 'awaiting').map(([k]) => k);
+  const revising = rows.filter(([, v]) => v.status === 'revising').map(([k]) => k);
+  const label = slug => esc(WF_STAGE_LABEL[slug] || slug);
+  let html = '';
+  if (awaiting.length) html += `<div class="wf-attn awaiting" role="status">🔔 <b>${t('wfAttnAwaiting')}</b> ${awaiting.map(label).join(', ')}</div>`;
+  if (revising.length) html += `<div class="wf-attn revising" role="status">✎ <b>${t('wfAttnRevising')}</b> ${revising.map(label).join(', ')}${state.revisionCount ? ` <span class="wf-muted">(${tf('wfRevCount', { n: esc(state.revisionCount) })})</span>` : ''}</div>`;
+  if (/^archived$/i.test(state.status || '')) html += `<div class="wf-attn archived">🗄 ${t('wfArchived')}</div>`;
+  return html;
+}
+
+// Configurações deste trabalho (State Version 8): o que muda o comportamento do engine
+// para este intent. Cada valor mostra de onde veio (scope, você, um comando).
+function renderWorkSettings(state) {
+  const S = state.settings || {};
+  const items = [];
+  const src = (s) => {
+    if (!s || !s.source) return '';
+    const m = s.source.match(/^from scope (.+)$/i);
+    const text = m ? tf('wfSrcScope', { scope: m[1] }) : /set by you/i.test(s.source) ? t('wfSrcYou')
+      : /set by a command/i.test(s.source) ? t('wfSrcCmd') : s.source;
+    return `<span class="wf-set-src">${esc(text)}</span>`;
+  };
+  const onOff = (v) => /^on$/i.test(v) ? 'on' : /^off$/i.test(v) ? 'off' : '';
+  const chip = (key, s, valueText, cls) => items.push(
+    `<div class="wf-set ${cls || ''}" title="${esc(t(key + 'Tip'))}"><span class="wf-set-k">${t(key)}</span><span class="wf-set-v">${esc(valueText)}</span>${src(s)}</div>`);
+  if (state.plan) items.push(`<div class="wf-set plan" title="${esc(t('wfSetPlanTip'))}"><span class="wf-set-k">${t('wfSetPlan')}</span><span class="wf-set-v">${esc(state.plan)}</span></div>`);
+  if (S.guardPolicy) chip('wfSetGuard', S.guardPolicy, S.guardPolicy.value, 'guard-' + S.guardPolicy.value.toLowerCase());
+  else if (S.changeControl) chip('wfSetGuard', S.changeControl, S.changeControl.value, 'guard-' + S.changeControl.value.toLowerCase());
+  for (const [k, key] of [['planApproval', 'wfSetPlanApproval'], ['collaborators', 'wfSetCollab'], ['sensors', 'wfSetSensors'],
+    ['learnings', 'wfSetLearnings'], ['summaryConfirmation', 'wfSetSummary']]) {
+    const s = S[k]; if (!s) continue;
+    const o = onOff(s.value);
+    chip(key, s, o ? t(o === 'on' ? 'wfOn' : 'wfOff') : s.value, o);
+  }
+  for (const [k, key] of [['guardsOff', 'wfSetGuardsOff'], ['guardsOn', 'wfSetGuardsOn']]) {
+    const s = S[k]; if (s && s.value && !/^none$/i.test(s.value)) chip(key, s, s.value, 'warn');
+  }
+  if (state.projectType) items.push(`<div class="wf-set"><span class="wf-set-k">${t('wfSetProjectType')}</span><span class="wf-set-v">${esc(state.projectType)}</span>${state.projectTypeSource ? `<span class="wf-set-src">${esc(/you/i.test(state.projectTypeSource) ? t('wfSrcYou') : t('wfSrcScan'))}</span>` : ''}</div>`);
+  if (state.constructionIteration || state.constructionExecution) items.push(`<div class="wf-set" title="${esc(t('wfSetConstructionTip'))}"><span class="wf-set-k">${t('wfSetConstruction')}</span><span class="wf-set-v">${esc([state.constructionIteration, state.constructionExecution, state.unitOwnership].filter(Boolean).join(' · '))}</span></div>`);
+  if (!items.length) return '';
+  return `<div class="wf-settings"><div class="wf-settings-title">${t('wfSettingsTitle')}</div><div class="wf-set-row">${items.join('')}</div></div>`;
+}
+
 function setWfScope(scope) {
   const grid = buildScopeGrid();
   if (!grid[scope]) return;
@@ -2097,38 +2317,156 @@ function setWfScope(scope) {
 }
 
 const WF_SVGNS = 'http://www.w3.org/2000/svg';
+
+// Dependências que de fato importam para o que roda: liga cada stage EXECUTE à
+// stage EXECUTE anterior mais próxima, atravessando as puladas (a→b(SKIP)→c vira a→c),
+// e remove as arestas redundantes (redução transitiva: se a→b→c existe, a→c sai).
+function wfVisibleEdges(grid) {
+  const adj = new Map();
+  for (const [a, b] of wfEdges()) {
+    if (!adj.has(a)) adj.set(a, new Set());
+    adj.get(a).add(b);
+  }
+  const runs = slug => grid[slug] === 'EXECUTE';
+  const out = new Map();
+  for (const a of adj.keys()) {
+    if (!runs(a)) continue;
+    const seen = new Set(), stack = [...adj.get(a)];
+    while (stack.length) {
+      const x = stack.pop();
+      if (seen.has(x)) continue;
+      seen.add(x);
+      if (runs(x)) { if (!out.has(a)) out.set(a, new Set()); out.get(a).add(x); }
+      else for (const y of adj.get(x) || []) stack.push(y);
+    }
+  }
+  const reachesWithout = (from, to) => {
+    const stack = [...(out.get(from) || [])].filter(x => x !== to), seen = new Set(stack);
+    while (stack.length) {
+      const x = stack.pop();
+      if (x === to) return true;
+      for (const y of out.get(x) || []) if (!seen.has(y)) { seen.add(y); stack.push(y); }
+    }
+    return false;
+  };
+  const edges = [];
+  for (const [a, set] of out) for (const b of set) if (!reachesWithout(a, b)) edges.push([a, b]);
+  return edges;
+}
+
+// Caminho ortogonal com cantos arredondados por uma lista de pontos.
+function wfRoundedPath(pts, r = 6) {
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1], [x, y] = pts[i], [nx, ny] = pts[i + 1];
+    const d1 = Math.hypot(x - px, y - py), d2 = Math.hypot(nx - x, ny - y);
+    const rr = Math.min(r, d1 / 2, d2 / 2);
+    if (rr < 0.5) { d += ` L${x},${y}`; continue; }
+    const ax = x - (x - px) / d1 * rr, ay = y - (y - py) / d1 * rr;
+    const bx = x + (nx - x) / d2 * rr, by = y + (ny - y) / d2 * rr;
+    d += ` L${ax},${ay} Q${x},${y} ${bx},${by}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + ` L${last[0]},${last[1]}`;
+}
+
+// Desenha as dependências por fora dos cards: setas curtas entre cards vizinhos
+// da mesma coluna e cotovelos pelos corredores entre colunas, nunca por cima de
+// um card. Passar o mouse (ou o foco do teclado) num card destaca o que ele
+// depende e o que depende dele.
 function drawWfEdges() {
   const wrapEl = document.getElementById('wf-board-wrap');
   const svg = document.getElementById('wf-edges');
   const boardEl = document.getElementById('wf-board');
   if (!wrapEl || !svg || !boardEl) return;
   const active = wfScope && buildScopeGrid()[wfScope] ? wfScope : 'feature';
-  const grid = buildScopeGrid()[active];
+  const grid = wfActiveGrid || buildScopeGrid()[active];
   const wr = wrapEl.getBoundingClientRect();
   svg.setAttribute('viewBox', `0 0 ${wr.width} ${wr.height}`);
   while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const boxOf = slug => boardEl.querySelector(`.wf-card[data-slug="${slug}"]`);
-  WF_EDGES.forEach(([from, to]) => {
-    const a = boxOf(from), b = boxOf(to);
-    if (!a || !b) return;
-    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-    let x1, y1, x2, y2;
-    if (rb.left > ra.left + 4) {
-      x1 = ra.right - wr.left; y1 = ra.top + ra.height / 2 - wr.top;
-      x2 = rb.left - wr.left;  y2 = rb.top + rb.height / 2 - wr.top;
-    } else {
-      x1 = ra.left + ra.width / 2 - wr.left; y1 = ra.bottom - wr.top;
-      x2 = rb.left + rb.width / 2 - wr.left; y2 = rb.top - wr.top;
-    }
-    const dx = (x2 - x1) * 0.5;
-    const d = Math.abs(x2 - x1) > 8
-      ? `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`
-      : `M${x1},${y1} C${x1},${y1 + 18} ${x2},${y2 - 18} ${x2},${y2}`;
+
+  const defs = document.createElementNS(WF_SVGNS, 'defs');
+  for (const id of ['wf-arrow', 'wf-arrow-hl']) {
+    const m = document.createElementNS(WF_SVGNS, 'marker');
+    m.setAttribute('id', id); m.setAttribute('viewBox', '0 0 8 8');
+    m.setAttribute('refX', '7'); m.setAttribute('refY', '4');
+    m.setAttribute('markerWidth', '6'); m.setAttribute('markerHeight', '6'); m.setAttribute('orient', 'auto');
     const p = document.createElementNS(WF_SVGNS, 'path');
-    p.setAttribute('d', d);
-    if (grid[from] === 'EXECUTE' && grid[to] === 'EXECUTE') p.setAttribute('class', 'live');
+    p.setAttribute('d', 'M0,0 L8,4 L0,8 z'); p.setAttribute('class', id);
+    m.appendChild(p); defs.appendChild(m);
+  }
+  svg.appendChild(defs);
+
+  const cols = [...boardEl.querySelectorAll('.wf-col')].map(c => c.getBoundingClientRect());
+  const colOf = {}, rowOf = {};
+  PHASES.forEach((p, ci) => p.stages.forEach((s, si) => { colOf[s] = ci; rowOf[s] = si; }));
+  const rel = r => ({ l: r.left - wr.left, r: r.right - wr.left, t: r.top - wr.top, b: r.bottom - wr.top, cy: r.top - wr.top + r.height / 2, cx: r.left - wr.left + r.width / 2 });
+  const boxOf = slug => { const el = boardEl.querySelector(`.wf-card[data-slug="${slug}"]`); return el ? rel(el.getBoundingClientRect()) : null; };
+  // corredor à direita da coluna ci (entre ci e ci+1)
+  const colEls = [...boardEl.querySelectorAll('.wf-col')];
+  const colCards = ci => colEls[ci] ? [...colEls[ci].querySelectorAll('.wf-card, .wf-vgate')].map(el => rel(el.getBoundingClientRect())) : [];
+  const gutter = ci => cols[ci + 1] ? (cols[ci].right + cols[ci + 1].left) / 2 - wr.left : cols[ci].right - wr.left + 6;
+  const laneUse = {};
+  const lane = (key) => { const n = laneUse[key] = (laneUse[key] || 0) + 1; return ((n % 2) ? 1 : -1) * Math.floor(n / 2) * 2.5; };
+
+  const edges = wfVisibleEdges(grid);
+  const drawn = [];
+  for (const [from, to] of edges) {
+    const a = boxOf(from), b = boxOf(to);
+    if (!a || !b) continue;
+    const ca = colOf[from], cb = colOf[to];
+    let pts;
+    if (ca === cb && rowOf[to] === rowOf[from] + 1) {
+      pts = [[a.cx, a.b], [b.cx, b.t - 1]];                       // vizinhos: seta curta no vão
+    } else if (ca === cb) {
+      const x = gutter(ca) + lane('g' + ca);                  // mesma coluna, pulando cards: pelo corredor da direita
+      pts = [[a.r, a.cy], [x, a.cy], [x, b.cy], [b.r + 1, b.cy]];
+    } else if (cb === ca + 1) {
+      const x = gutter(ca) + lane('g' + ca);                  // coluna seguinte: cotovelo no corredor
+      pts = [[a.r, a.cy], [x, a.cy], [x, b.cy], [b.l - 1, b.cy]];
+    } else if (cb > ca) {
+      const x1 = gutter(ca) + lane('g' + ca), x2 = gutter(cb - 1) + lane('g' + (cb - 1));
+      // atravessa as colunas do meio por um vão livre entre cards (o mais perto do destino)
+      const mids = [];
+      for (let ci = ca + 1; ci < cb; ci++) mids.push(...colCards(ci));
+      const blocked = y => mids.some(c => y > c.t - 3 && y < c.b + 3);
+      const cands = [b.cy, ...mids.flatMap(c => [c.t - 8, c.b + 8])].filter(y => !blocked(y));
+      const yGap = (cands.length ? cands.reduce((m, y) => Math.abs(y - b.cy) < Math.abs(m - b.cy) ? y : m) : b.t - 5)
+        + lane('row' + Math.round(b.cy));
+      pts = [[a.r, a.cy], [x1, a.cy], [x1, yGap], [x2, yGap], [x2, b.cy], [b.l - 1, b.cy]];
+    } else {
+      continue;                                               // dependência para trás: não desenha
+    }
+    const p = document.createElementNS(WF_SVGNS, 'path');
+    p.setAttribute('d', wfRoundedPath(pts));
+    p.setAttribute('class', 'live');
+    p.setAttribute('marker-end', 'url(#wf-arrow)');
+    p.dataset.from = from; p.dataset.to = to;
     svg.appendChild(p);
-  });
+    drawn.push(p);
+  }
+
+  // Destaque de dependências ao passar o mouse ou focar um card
+  const setFocus = (slug) => {
+    boardEl.classList.toggle('wf-focus', !!slug);
+    wrapEl.classList.toggle('wf-focus', !!slug);
+    const related = new Set(slug ? [slug] : []);
+    for (const p of drawn) {
+      const on = !!slug && (p.dataset.from === slug || p.dataset.to === slug);
+      p.classList.toggle('hl', on);
+      p.setAttribute('marker-end', on ? 'url(#wf-arrow-hl)' : 'url(#wf-arrow)');
+      if (on) { related.add(p.dataset.from); related.add(p.dataset.to); }
+    }
+    for (const c of boardEl.querySelectorAll('.wf-card')) {
+      c.classList.toggle('rel', related.has(c.dataset.slug));
+      c.classList.toggle('upstream', !!slug && c.dataset.slug !== slug && drawn.some(p => p.dataset.to === slug && p.dataset.from === c.dataset.slug));
+      c.classList.toggle('downstream', !!slug && c.dataset.slug !== slug && drawn.some(p => p.dataset.from === slug && p.dataset.to === c.dataset.slug));
+    }
+  };
+  boardEl.onmouseover = e => { const c = e.target.closest('.wf-card'); setFocus(c ? c.dataset.slug : null); };
+  boardEl.onmouseleave = () => setFocus(null);
+  boardEl.onfocusin = e => { const c = e.target.closest('.wf-card'); if (c) setFocus(c.dataset.slug); };
+  boardEl.onfocusout = () => setFocus(null);
 }
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('resize', () => requestAnimationFrame(drawWfEdges));
@@ -2257,9 +2595,10 @@ function safeRenderFile(path) {
 function runMermaid() {
   try {
     if (typeof mermaid === 'undefined') return;
-    if (!runMermaid._init) {
-      mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
-      runMermaid._init = true;
+    const mTheme = (typeof theme !== 'undefined' && theme === 'light') ? 'default' : 'dark';
+    if (runMermaid._init !== mTheme) {
+      mermaid.initialize({ startOnLoad: false, theme: mTheme, securityLevel: 'strict' });
+      runMermaid._init = mTheme;
     }
     const nodes = document.querySelectorAll('.fb-mermaid:not([data-processed])');
     if (nodes.length) mermaid.run({ nodes }).catch(() => {});

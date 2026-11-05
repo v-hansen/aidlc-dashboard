@@ -248,6 +248,8 @@
   button.proc-unit { cursor: pointer; font: inherit; font-size: .74rem; }
   .proc-unit.has { color: var(--green); border-color: var(--green); }
   @media (max-width: 640px) { .proc-stage summary { flex-wrap: wrap; } .proc-right { max-width: 100%; align-items: flex-start; text-align: left; } .proc-body { padding-left: 12px; } }
+/* Inside the IDE extension the folder comes from the workspace and changes are watched */
+.ide-host .pick-btn, .ide-host #pickInputBtn, .ide-host #autoWrap, .ide-host #switchTokensBtn, .ide-host #pickTokensBtn { display: none !important; }
 </style>
 </head>
 <body>
@@ -689,6 +691,10 @@
   let autoTimer = null;       // setInterval id for polling
   let lastSig = "";           // signature of the last scan (path|size|mtime per .md)
   let polling = false;        // guard against overlapping polls
+  // Inside the Kiro / VS Code extension there is no directory picker: the extension
+  // reads aidlc-docs/ and the agent transcripts and posts them to this page.
+  const host = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
+  if (host) document.body.classList.add("ide-host");
   const AUTO_INTERVAL_MS = 5000;
 
   // ========== Parsing ==========
@@ -850,7 +856,7 @@
     const out = normalize(rawOut); FILES = out;
     if (!out.length) {
       $("emptyState").classList.remove("hidden"); $("dashboard").classList.add("hidden");
-      lastRaw = null; alert(t("alertNoMd"));
+      lastRaw = null; if (!host) alert(t("alertNoMd"));
       return;
     }
     const stateFile = out.find(f => /(^|\/)aidlc-state\.md$/i.test(f.rel));
@@ -1608,6 +1614,7 @@
   }
 
   async function openTokensFolder() {
+    if (host) { host.postMessage({ type: "refreshTokens" }); return; }
     if (!window.showDirectoryPicker) { alert(t("alertNoPicker")); return; }
     try { tokenDirHandle = await window.showDirectoryPicker({ mode: "read" }); await loadTokenData(); renderTokensTab(); }
     catch (e) { if (e.name !== "AbortError") alert(t("errRead") + e.message); }
@@ -1620,6 +1627,7 @@
     }
   }
   async function loadTokenData() {
+    if (host) { host.postMessage({ type: "refreshTokens" }); return; }
     if (!tokenDirHandle) return;
     const agg = { input:0, output:0, cacheRead:0, cacheWrite:0, messages:0, sessions:[], byModel:{}, events:[], kiroSessions:[], kiroEvents:[], kiroCredits:0 };
     const files = []; await collectJsonl(tokenDirHandle, 0, files);
@@ -1690,7 +1698,7 @@
   document.querySelectorAll(".pick-btn").forEach(b => b.onclick = pickDirectory);
   $("pickInputBtn").onclick = () => $("dirInput").click();
   $("dirInput").onchange = (e) => { if (e.target.files.length) handleInputFiles(e.target.files); };
-  $("reloadBtn").onclick = async () => { if (lastDirHandle) await handleDirectoryHandle(lastDirHandle); else pickDirectory(); };
+  $("reloadBtn").onclick = async () => { if (host) { host.postMessage({ type: "refresh" }); return; } if (lastDirHandle) await handleDirectoryHandle(lastDirHandle); else pickDirectory(); };
 
   // ========== Auto-refresh (polling) ==========
   // Only works with the File System Access API (a live dir handle). The webkitdirectory
@@ -1781,6 +1789,24 @@
 
   document.querySelectorAll("#langSel [data-lang]").forEach(b => b.onclick = () => setLang(b.dataset.lang));
   applyStatic();
+
+  // ========== IDE host mode ==========
+  // The extension sends { type: "v1files", root, files: [{ path, name, text, size, mtime }] }
+  // on open and whenever a .md under aidlc-docs/ changes, and { type: "tokens", tokens }
+  // with the same shape loadTokenData() builds from a transcripts folder.
+  if (host) {
+    window.addEventListener("message", (e) => {
+      const m = e.data || {};
+      if (m.type === "v1files" && Array.isArray(m.files)) {
+        const changed = computeSig(m.files) !== lastSig;
+        if (changed || !STATE) { finalize(m.files, String(m.root || t("projectFallback"))); if (STATE) flashUpdated(); }
+      } else if (m.type === "tokens" && m.tokens) {
+        tokenData = m.tokens;
+        renderTokensTab();
+      }
+    });
+    host.postMessage({ type: "ready" });
+  }
 
   // Expose for test harness
   window.__TEST_FINALIZE__ = finalize;

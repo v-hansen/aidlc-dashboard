@@ -24,7 +24,28 @@ const os = require('os');
 
 const BASE_PORT = parseInt(process.env.PORT || '3939', 10);
 
+// Only loopback host names are accepted. Binding to 127.0.0.1 is not enough on
+// its own: with DNS rebinding a hostile site can resolve its own name to
+// 127.0.0.1, and its pages would then be same-origin with this server. Checking
+// the Host header (and the Origin, when a browser sends one) closes that path.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+function isLoopbackHost(hostHeader) {
+  if (!hostHeader) return false;
+  try { return LOOPBACK_HOSTS.has(new URL(`http://${hostHeader}`).hostname); }
+  catch { return false; }
+}
+
 const app = express();
+app.use((req, res, next) => {
+  if (!isLoopbackHost(req.headers.host)) return res.status(403).send('Forbidden: non-loopback Host header');
+  const origin = req.headers.origin;
+  if (origin) {
+    let ok = false;
+    try { ok = new URL(origin).host === req.headers.host; } catch { ok = false; }
+    if (!ok) return res.status(403).send('Forbidden: cross-origin request');
+  }
+  next();
+});
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -148,6 +169,21 @@ async function loadDashboard() {
   if (!data.scopeGrid && lastDashboard && lastDashboard.scopeGrid) {
     data.scopeGrid = lastDashboard.scopeGrid;
     data.scopeGridSource = lastDashboard.scopeGridSource;
+  }
+  // Compiled stage graph (stage-graph.json, next to scope-grid.json): names, lead and
+  // support agents, ALWAYS/CONDITIONAL, conditions and dependencies of the installed
+  // engine version. The Workflow tab prefers it over the built-in values.
+  for (const cand of gridCandidates.map(c => c.replace('scope-grid.json', 'stage-graph.json'))) {
+    const parsed = await readJson(path.join(projectPath, cand));
+    if (parsed && typeof parsed === 'object') {
+      data.stageGraph = parsed;
+      data.stageGraphSource = cand;
+      break;
+    }
+  }
+  if (!data.stageGraph && lastDashboard && lastDashboard.stageGraph) {
+    data.stageGraph = lastDashboard.stageGraph;
+    data.stageGraphSource = lastDashboard.stageGraphSource;
   }
 
   // Remember this good snapshot so the next mid-write read can carry it forward.
@@ -574,6 +610,7 @@ async function renameKnowledge(space, slug, name, newSlug, newName) {
 // Origin on WebSocket handshakes, so this stops another site open in the same
 // browser from connecting to ws://127.0.0.1:<port> (cross-site WS hijacking).
 function isAllowedOrigin(req) {
+  if (!isLoopbackHost(req.headers.host)) return false; // DNS rebinding guard
   const origin = req.headers.origin;
   if (!origin) return true; // non-browser clients (curl, scripts) on loopback
   try { return new URL(origin).host === req.headers.host; } catch { return false; }
