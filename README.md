@@ -38,11 +38,13 @@ Great for following a live workflow, workshops, or sharing progress with stakeho
 
 1. Download the `.vsix`
 2. Command Palette (`Cmd/Ctrl+Shift+P`) → **Extensions: Install from VSIX**
-3. Open a project containing an `aidlc/` folder and run **`AIDLC: Open Dashboard`**
+3. Open a project containing an `aidlc/` folder (at the root or in a subfolder) and run **`AIDLC: Open Dashboard`**
 
 No pickers needed: the extension detects the workspace automatically and refreshes instantly via file watcher.
 
 **AI-DLC v1 workflows:** in a project with only an `aidlc-docs/` folder, the same command opens the v1 dashboard (Overview, Process, Phases, Questions, Files and Tokens tabs). To choose explicitly, run **`AIDLC: Open AI-DLC v1 Dashboard`** / **`AIDLC: Open AI-DLC v2 Dashboard`**, or set `aidlcDashboard.version` to `v1` or `v2` (default `auto`).
+
+The project can be anywhere in the workspace: the extension looks in every open folder (multi-root workspaces included) and in their subfolders. With more than one AI-DLC project it asks which one to show and remembers the choice; **`AIDLC: Select Project Folder…`** (or the dashboard's open-folder button) switches project or picks a folder outside the workspace.
 
 ## Option 3 — Web server (any browser)
 

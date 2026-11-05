@@ -249,7 +249,7 @@
   .proc-unit.has { color: var(--green); border-color: var(--green); }
   @media (max-width: 640px) { .proc-stage summary { flex-wrap: wrap; } .proc-right { max-width: 100%; align-items: flex-start; text-align: left; } .proc-body { padding-left: 12px; } }
 /* Inside the IDE extension the folder comes from the workspace and changes are watched */
-.ide-host .pick-btn, .ide-host #pickInputBtn, .ide-host #autoWrap, .ide-host #switchTokensBtn, .ide-host #pickTokensBtn { display: none !important; }
+.ide-host #pickInputBtn, .ide-host #autoWrap, .ide-host #switchTokensBtn, .ide-host #pickTokensBtn { display: none !important; }
 </style>
 </head>
 <body>
@@ -1692,6 +1692,7 @@
 
   // pick / input / drop / reload
   async function pickDirectory() {
+    if (host) { host.postMessage({ type: "pickFolder" }); return; }
     if (window.showDirectoryPicker) { try { const h = await window.showDirectoryPicker(); await handleDirectoryHandle(h); } catch (e) {} }
     else $("dirInput").click();
   }
