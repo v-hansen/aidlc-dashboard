@@ -35,24 +35,24 @@ function connectWebSocket() {
       }
     } else if (msg.type === 'data') {
       dashboardData = msg.dashboard;
-      document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+      setHTML(document.getElementById('app'), renderDashboard(dashboardData));
       switchTab(activeTab);
       const ind = document.getElementById('refresh-indicator');
       if (ind) ind.textContent = t('updatedAt') + ' ' + new Date().toLocaleTimeString(LOCALES[lang] || 'en-US');
     } else if (msg.type === 'tokens') {
       tokenData = msg.tokens;
       const el = document.getElementById('tab-tokens');
-      if (el) el.innerHTML = safeRender(renderTokensTab);
+      if (el) setHTML(el, safeRender(renderTokensTab));
     } else if (msg.type === 'tree') {
       fbLoading = false;
       fbTree = msg.tree || [];
       const el = document.getElementById('tab-files');
-      if (el) { el.innerHTML = safeRender(renderFilesTab); if (activeTab === 'files') requestAnimationFrame(runMermaid); }
+      if (el) { setHTML(el, safeRender(renderFilesTab)); if (activeTab === 'files') requestAnimationFrame(runMermaid); }
     } else if (msg.type === 'file') {
       fbContentCache[msg.path] = msg.content != null ? msg.content : ('(could not read ' + msg.path + ')');
       fbSelectedPath = msg.path;
       const el = document.getElementById('tab-files');
-      if (el) { el.innerHTML = safeRender(renderFilesTab); requestAnimationFrame(runMermaid); }
+      if (el) { setHTML(el, safeRender(renderFilesTab)); requestAnimationFrame(runMermaid); }
     } else if (msg.type === 'knowledge') {
       if (typeof kbOnData === 'function') kbOnData(msg.knowledge);
     } else if (msg.type === 'knowledgeFile') {
@@ -89,7 +89,7 @@ function connectWebSocket() {
 // escaped text / a data attribute, never as executable JS source).
 function showProjectSelector() {
   const app = document.getElementById('app');
-  app.innerHTML = renderProjectSelector();
+  setHTML(app, renderProjectSelector());
 
   const input = document.getElementById('project-path-input');
   if (input) {
@@ -161,8 +161,7 @@ function selectProject(p) {
   saveRecentPath(p);
   const projectName = p.split('/').filter(Boolean).pop() || p;
   document.title = `AIDLC Dashboard - ${projectName}`;
-  document.getElementById('app').innerHTML =
-    `<div class="load-area"><div class="header-logo">🔬</div><h1>AI-DLC v2 Dashboard</h1><p class="load-desc">${t('loading')}</p></div>`;
+  setHTML(document.getElementById('app'), `<div class="load-area"><div class="header-logo">🔬</div><h1>AI-DLC v2 Dashboard</h1><p class="load-desc">${t('loading')}</p></div>`);
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'setProject', path: p }));
   }
@@ -230,7 +229,7 @@ async function openAidlcFile(path) {
   fbSelectedPath = path;
   if (fbContentCache[path] != null) {
     const el = document.getElementById('tab-files');
-    if (el) { el.innerHTML = safeRender(renderFilesTab); requestAnimationFrame(runMermaid); }
+    if (el) { setHTML(el, safeRender(renderFilesTab)); requestAnimationFrame(runMermaid); }
   } else if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'readFile', path }));
   }
@@ -287,7 +286,6 @@ Object.assign(I18N.es = I18N.es || {}, {
 // ─── Initialization ─────────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('app').innerHTML =
-    `<div class="load-area"><div class="header-logo">🔬</div><h1>AI-DLC v2 Dashboard</h1><p class="load-desc">${t('loading')}</p></div>`;
+  setHTML(document.getElementById('app'), `<div class="load-area"><div class="header-logo">🔬</div><h1>AI-DLC v2 Dashboard</h1><p class="load-desc">${t('loading')}</p></div>`);
   connectWebSocket();
 });

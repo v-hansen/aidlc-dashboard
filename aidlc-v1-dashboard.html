@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-4QRsuUun88lFGGrodPgIVue0v6NoDCxPLj3e8rD1hnk='; style-src 'unsafe-inline'; img-src data:; object-src 'none'; base-uri 'none'; form-action 'none'"><!-- pragma: allowlist secret -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>AI-DLC v1 — Dashboard de Acompanhamento</title>
 <style>
@@ -82,6 +83,7 @@
   .badge.progress { background: var(--yellow-bg); color: var(--yellow); }
   .badge.pending { background: var(--surface2); color: var(--muted); }
   .badge.skipped { background: var(--red-bg); color: var(--red); }
+  .badge.analysis { background: transparent; color: var(--yellow); border: 1px dashed var(--yellow); }
 
   .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .74rem; color: var(--muted); margin-top: 10px; }
   .legend span { display: inline-flex; align-items: center; gap: 5px; }
@@ -215,7 +217,8 @@
   .proc-stage.dec-run { border-left-color: var(--green); }
   .proc-stage.dec-skip { border-left-color: var(--red); opacity: .72; }
   .proc-stage.dec-pending, .proc-stage.dec-unrecorded { border-left-color: var(--yellow); }
-  .proc-stage.st-current { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
+  .proc-stage.st-current, .proc-stage.st-awaiting { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
+  .proc-stage.st-awaiting .proc-num { background: var(--yellow-bg); color: var(--yellow); }
   .proc-stage summary { list-style: none; cursor: pointer; display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; }
   .proc-stage summary::-webkit-details-marker { display: none; }
   .proc-num { flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--surface2); display: grid; place-items: center; font-size: .75rem; font-weight: 700; color: var(--muted); }
@@ -328,20 +331,20 @@
   const MODEL = [
     { key: "inception", name: "Inception", cssClass: "inception", icon: "🔵", blurbKey: "blurbInception",
       stages: [
-        { name: "Execution Plan", match: ["inception/plans/execution-plan.md"] },
-        { name: "Reverse Engineering (brownfield)", optional: true, match: ["inception/reverse-engineering/"] },
-        { name: "Requirements", match: ["inception/requirements/requirements.md", "inception/requirements/requirement-verification-questions.md"] },
-        { name: "User Stories", optional: true, match: ["inception/user-stories/"] },
-        { name: "Application Design", optional: true, match: ["inception/application-design/"] },
+        { name: "Execution Plan", stateKeys: ["workflow planning", "execution plan"], match: ["inception/plans/execution-plan.md"] },
+        { name: "Reverse Engineering (brownfield)", stateKeys: ["reverse engineering"], optional: true, match: ["inception/reverse-engineering/"] },
+        { name: "Requirements", stateKeys: ["requirements analysis", "requirements"], match: ["inception/requirements/requirements.md", "inception/requirements/requirement-verification-questions.md"] },
+        { name: "User Stories", stateKeys: ["user stories"], optional: true, match: ["inception/user-stories/"] },
+        { name: "Application Design", stateKeys: ["application design"], optional: true, match: ["inception/application-design/"] },
       ] },
     { key: "construction", name: "Construction", cssClass: "construction", icon: "🟢", blurbKey: "blurbConstruction",
       stages: [
-        { name: "Plans (por unidade)", lk: "stPlans", match: ["construction/plans/"] },
-        { name: "Functional Design", optional: true, match: ["functional-design/"], suffix: true },
-        { name: "NFR Requirements & Design", optional: true, match: ["nfr-requirements/", "nfr-design/"], suffix: true },
-        { name: "Infrastructure Design", optional: true, match: ["infrastructure-design/"], suffix: true },
-        { name: "Code Generation (resumos)", lk: "stCodeGen", match: ["/code/"], suffix: true },
-        { name: "Build & Test", match: ["construction/build-and-test/"] },
+        { name: "Plans (por unidade)", lk: "stPlans", stateKeys: [], match: ["construction/plans/"] },
+        { name: "Functional Design", stateKeys: ["functional design"], optional: true, match: ["functional-design/"], suffix: true },
+        { name: "NFR Requirements & Design", stateKeys: ["nfr requirements", "nfr design"], optional: true, match: ["nfr-requirements/", "nfr-design/"], suffix: true },
+        { name: "Infrastructure Design", stateKeys: ["infrastructure design"], optional: true, match: ["infrastructure-design/"], suffix: true },
+        { name: "Code Generation (resumos)", lk: "stCodeGen", stateKeys: ["code generation"], match: ["/code/"], suffix: true },
+        { name: "Build & Test", stateKeys: ["build and test", "build & test"], match: ["construction/build-and-test/"] },
       ] },
   ];
   // Operations is a v1 placeholder (not implemented), so it is NOT a fixed phase.
@@ -390,6 +393,7 @@
       "status_progress": "Em andamento",
       "status_pending": "Pendente",
       "status_skipped": "Não usado",
+      "status_analysis": "Em análise · Workflow Planning",
       "filesRead": "{n} arquivos .md lidos",
       "activeStages": "{n} estágios ativos",
       "progressLegend": "Progresso = checkboxes concluídos + artefatos presentes",
@@ -402,6 +406,8 @@
       "inPlans": "em planos/tarefas",
       "noneMarked": "nenhuma marcada",
       "pendingQ": "Perguntas pendentes",
+      "qClosed": "sem resposta no arquivo; etapa já aprovada",
+      "qClosedCount": "{c} sem resposta no arquivo (etapa aprovada)",
       "awaitAnswer": "aguardam [Answer]:",
       "allAnswered": "tudo respondido",
       "phasesTitle": "Fases",
@@ -489,6 +495,7 @@
       "status_progress": "In progress",
       "status_pending": "Pending",
       "status_skipped": "Not used",
+      "status_analysis": "Under analysis · Workflow Planning",
       "filesRead": "{n} .md files read",
       "activeStages": "{n} active stages",
       "progressLegend": "Progress = completed checkboxes + artifacts present",
@@ -501,6 +508,8 @@
       "inPlans": "in plans/tasks",
       "noneMarked": "none checked",
       "pendingQ": "Pending questions",
+      "qClosed": "no answer in the file; stage already approved",
+      "qClosedCount": "{c} without an answer in the file (stage approved)",
       "awaitAnswer": "awaiting [Answer]:",
       "allAnswered": "all answered",
       "phasesTitle": "Phases",
@@ -588,6 +597,7 @@
       "status_progress": "En curso",
       "status_pending": "Pendiente",
       "status_skipped": "No usado",
+      "status_analysis": "En análisis · Workflow Planning",
       "filesRead": "{n} archivos .md leídos",
       "activeStages": "{n} etapas activas",
       "progressLegend": "Progreso = checkboxes completados + artefactos presentes",
@@ -600,6 +610,8 @@
       "inPlans": "en planes/tareas",
       "noneMarked": "ninguna marcada",
       "pendingQ": "Preguntas pendientes",
+      "qClosed": "sin respuesta en el archivo; etapa ya aprobada",
+      "qClosedCount": "{c} sin respuesta en el archivo (etapa aprobada)",
       "awaitAnswer": "esperan [Answer]:",
       "allAnswered": "todo respondido",
       "phasesTitle": "Fases",
@@ -700,6 +712,8 @@
   // ========== Parsing ==========
   const CB_RE = /^[\s>*-]*\[([ xX])\]/;
   const ANSWER_RE = /^[\s>*-]*\[Answer\]\s*:\s*(.*)$/i;
+  // "generated, awaiting approval" on a checked stage: the work exists but the gate is still open
+  const AWAIT_RE = /aguardando (a )?aprova|awaiting (your |user )?approval|pending approval|waiting for approval|esperando (la )?aprobaci|pendiente de aprobaci/i;
 
   function parseChecklist(text) {
     let done = 0, total = 0;
@@ -780,9 +794,16 @@
       const label = m[2];
       const skipped = /\b(skip|skipped|pular|pulado|placeholder)\b/i.test(label);
       const name = label.replace(/[-–—].*$/, "").replace(/[*`]/g, "").trim().toLowerCase();
-      map[name] = skipped ? "skipped" : (checked ? "done" : "pending");
+      map[name] = skipped ? "skipped" : (checked ? (AWAIT_RE.test(label) ? "awaiting" : "done") : "pending");
     });
     return map;
+  }
+  // Exact stage names from the state file ("- [x] Requirements Analysis - …"); a fuzzy match
+  // would let "NFR Requirements" pick up "Requirements Analysis" and show Construction progress.
+  function stageStatusByKeys(keys, statusMap) {
+    const names = Object.keys(statusMap);
+    for (const k of keys) { const hit = names.find(n => n === k || n.startsWith(k + " ") || n.startsWith(k + "(")); if (hit) return statusMap[hit]; }
+    return null;
   }
   // Match a MODEL stage name to a state entry by keyword overlap.
   function stageStatusFor(stageName, statusMap) {
@@ -798,7 +819,7 @@
     return null;
   }
 
-  function computePhase(ph, files, statusMap) {
+  function computePhase(ph, files, statusMap, planningOpen) {
     const stages = ph.stages.map(st => {
       const matched = files.filter(f => fileMatchesStage(f, st));
       let done = 0, total = 0;
@@ -806,21 +827,25 @@
         // Don't count execution-plan.md checkboxes as task progress — it's the stage
         // INDEX (stale by design), authoritative status comes from aidlc-state.md.
         if (/execution-plan\.md$/i.test(f.rel)) return;
+        // Checkboxes in user-stories/ are acceptance criteria to be met in Construction, not tasks of this stage.
+        if (/(^|\/)user-stories\//i.test(f.rel)) return;
         const c = parseChecklist(f.text); done += c.done; total += c.total;
       });
       const present = matched.length > 0;
-      const stateStatus = (statusMap && (ph.key !== "operations")) ? stageStatusFor(st.name, statusMap) : null;
+      const stateStatus = (statusMap && (ph.key !== "operations")) ? (st.stateKeys ? stageStatusByKeys(st.stateKeys, statusMap) : stageStatusFor(st.name, statusMap)) : null;
       let pct, status;
       if (stateStatus === "skipped") { status = "skipped"; pct = 0; }
       else if (stateStatus === "done") { status = "done"; pct = 100; }
+      else if (stateStatus === "awaiting") { status = "progress"; pct = 90; }
       else if (ph.key === "operations") { status = present ? (total ? pctStatus(done, total) : "progress") : "pending"; pct = total ? Math.round(done/total*100) : 0; }
-      else if (stateStatus === "pending" && !present) { status = st.optional ? "skipped" : "pending"; pct = 0; }
-      else if (!present) { status = st.optional ? "skipped" : "pending"; pct = 0; }
+      // Before Workflow Planning a conditional stage is not skipped, it is not decided yet
+      else if (stateStatus === "pending" && !present) { status = st.optional ? (planningOpen ? "analysis" : "skipped") : "pending"; pct = 0; }
+      else if (!present) { status = st.optional ? (planningOpen ? "analysis" : "skipped") : "pending"; pct = 0; }
       else if (total > 0) { pct = Math.round(done/total*100); status = pctStatus(done, total); }
       else { pct = 100; status = "done"; }
       return { name: st.name, lk: st.lk, optional: !!st.optional, files: matched, done, total, pct, status, present, stateStatus };
     });
-    const active = stages.filter(s => s.status !== "skipped");
+    const active = stages.filter(s => s.status !== "skipped" && s.status !== "analysis");
     const phPct = active.length ? Math.round(active.reduce((a, s) => a + s.pct, 0) / active.length) : 0;
     const anyProgress = stages.some(s => s.status === "progress");
     const allDone = active.length && active.every(s => s.status === "done");
@@ -830,6 +855,8 @@
 
   function deriveProjectName(stateFile, fallback) {
     if (stateFile) {
+      const pj = stateFile.text.match(/^[\s>*-]*\**\s*project(?:\s*name)?\s*\**\s*:\s*\**\s*(.+)$/im);
+      if (pj) { const name = pj[1].replace(/[*`]/g, "").trim(); if (name) return name.slice(0, 120); }
       const ws = stateFile.text.match(/workspace\s*root\**\s*[:\-]\s*(.+)/i);
       if (ws) { const base = ws[1].trim().replace(/[#*`]/g, "").replace(/\/+$/, "").split("/").pop(); if (base) return base.slice(0, 80); }
     }
@@ -863,13 +890,28 @@
     const projName = deriveProjectName(stateFile, rootName);
     const stateMeta = deriveStateMeta(stateFile);
     const stageStatus = parseStageStatus(stateFile);
-    const phases = MODEL.map(ph => computePhase(ph, out, stageStatus));
+    // Workflow Planning not done and no execution plan yet: conditional stages are still open
+    const planningOpen = !!stateFile && stageStatusByKeys(["workflow planning"], stageStatus) !== "done" && !out.some(f => /(^|\/)execution-plan\.md$/i.test(f.rel));
+    const phases = MODEL.map(ph => computePhase(ph, out, stageStatus, planningOpen));
     // Append Operations only if the project actually produced artifacts under operations/
     const hasOps = out.some(f => /^operations\//i.test(f.rel) && f.text.trim().length > 0);
-    if (hasOps) phases.push(computePhase(OPERATIONS_PHASE, out, stageStatus));
-    const qFiles = out.filter(f => /plan\.md$|requirement-verification-questions\.md$|\/plans\//i.test(f.rel));
+    if (hasOps) phases.push(computePhase(OPERATIONS_PHASE, out, stageStatus, planningOpen));
+    const qFiles = out.filter(f => /plan\.md$|-questions(-\d+)?\.md$|\/plans\//i.test(f.rel));
     let qItems = [];
     qFiles.forEach(f => parseQuestions(f.text).forEach(it => qItems.push({ ...it, src: f.rel })));
+    // An empty [Answer]: in a file whose stage the state already marks done was answered some other
+    // way (in chat, recorded in audit.md): show it as "no answer in the file", not as pending.
+    const qStageKey = (rel) => /requirements\//i.test(rel) ? "requirements analysis"
+      : /(story-generation-plan|user-stories)/i.test(rel) ? "user stories"
+      : /execution-plan|workflow-planning/i.test(rel) ? "workflow planning"
+      : /application-design/i.test(rel) ? "application design"
+      : /units-generation|unit-of-work/i.test(rel) ? "units generation"
+      : ((rel.match(/(functional-design|nfr-requirements|nfr-design|infrastructure-design|code-generation)-plan\.md$/i) || [])[1] || "").replace(/-/g, " ") || null;
+    qItems.forEach(it => {
+      if (it.answered) return;
+      const k = qStageKey(it.src);
+      if (k && stageStatusByKeys([k], stageStatus) === "done") it.closed = true;
+    });
     const auditFile = out.find(f => /(^|\/)audit\.md$/i.test(f.rel));
     const auditWindows = auditFile ? parseAuditWindows(auditFile.text) : [];
     STATE = { projName, stateMeta, phases, qItems, auditWindows, rootLabel: stateFile ? "aidlc-docs/" : rootName + "/", count: out.length };
@@ -1142,6 +1184,7 @@
       if (decision === "skip") status = "skipped";
       else if (decision === "placeholder") status = "placeholder";
       else if (current && !done) status = "current";
+      else if (done && (AWAIT_RE.test((fromState && fromState.note) || "") || (current && AWAIT_RE.test(curRaw)))) status = "awaiting";
       else if (done) status = "done";
       else if (hasArtifacts && decision === "run") status = "progress";
       else status = "pending";
@@ -1165,16 +1208,16 @@
     pt: {
       tab: "Processo", title: "Workflow AI-DLC v1.0.1 · 3 fases · 14 estágios",
       intro: "Toda requisição começa em Workspace Detection. Estágios ALWAYS rodam sempre; os CONDITIONAL rodam só quando o Workflow Planning decide que agregam valor, e essa decisão pode mudar depois. Construction repete os estágios de design e código para cada unidade de trabalho.",
-      sumRun: "vão rodar", sumSkip: "pulados", sumPending: "a decidir", sumPlaceholder: "placeholder",
+      sumRun: "vão rodar", sumSkip: "pulados", sumPending: "em análise", sumPlaceholder: "placeholder",
       progress: "{done} de {total} estágios que rodam já concluídos",
       noState: "Sem aidlc-state.md: as decisões abaixo vêm do plano, dos artefatos ou da regra.",
-      planningPending: "O Workflow Planning ainda não terminou: os estágios condicionais posteriores ainda não foram decididos.",
+      planningPending: "Ainda não existe plano de execução (inception/plans/execution-plan.md): ele é criado no Workflow Planning, que ainda não terminou. Até lá, os estágios CONDITIONAL seguintes ficam “em análise” e os ALWAYS aparecem como “vai rodar · regra ALWAYS”, porque a regra do v1 sempre os executa.",
       kind_always: "ALWAYS", kind_conditional: "CONDITIONAL", kind_placeholder: "PLACEHOLDER", perUnit: "POR UNIDADE",
       gate_approval: "aprovação explícita", gate_auto: "segue automaticamente", gate_none: "sem gate",
-      dec_run: "Vai rodar", dec_skip: "Pulado", dec_pending: "A decidir", dec_unrecorded: "Sem registro", dec_placeholder: "Placeholder",
-      st_done: "Concluído", st_current: "Estágio atual", st_progress: "Artefatos gerados", st_pending: "Ainda não iniciado", st_skipped: "Não roda", st_placeholder: "Ainda não implementado",
+      dec_run: "Vai rodar", dec_skip: "Pulado", dec_pending: "Em análise", dec_unrecorded: "Sem registro", dec_placeholder: "Placeholder",
+      st_done: "Concluído", st_current: "Estágio atual", st_awaiting: "Gerado, aguardando aprovação", st_progress: "Artefatos gerados", st_pending: "Ainda não iniciado", st_skipped: "Não roda", st_placeholder: "Ainda não implementado",
       srcState: "aidlc-state.md", srcPlan: "execution-plan.md", srcSummary: "resumo do plano", srcArtifacts: "artefatos encontrados", srcRule: "regra do workflow", srcInferred: "inferido: estágios seguintes rodaram sem ele", planWhy: "motivo no plano",
-      srcPendingAt: "decidido em {stage}", srcNone: "não registrado",
+      srcPendingAt: "será definido no {stage}", dec_run_rule: "Vai rodar · regra ALWAYS", srcNone: "não registrado",
       changed: "Decisão alterada depois do plano: o plano dizia “{plan}”, o estado atual diz “{state}”.",
       why: "Motivo", note: "Nota", source: "Fonte da decisão",
       does: "O que faz", execIf: "Roda se", skipIf: "É pulado se", outputs: "Saídas", units: "Unidades", noUnits: "Nenhuma unidade em construction/ ainda.",
@@ -1183,16 +1226,16 @@
     en: {
       tab: "Process", title: "AI-DLC v1.0.1 workflow · 3 phases · 14 stages",
       intro: "Every request starts at Workspace Detection. ALWAYS stages run every time; CONDITIONAL stages run only when Workflow Planning decides they add value, and that decision can change later. Construction repeats its design and code stages once per unit of work.",
-      sumRun: "will run", sumSkip: "skipped", sumPending: "to be decided", sumPlaceholder: "placeholder",
+      sumRun: "will run", sumSkip: "skipped", sumPending: "under analysis", sumPlaceholder: "placeholder",
       progress: "{done} of {total} running stages completed",
       noState: "No aidlc-state.md: the decisions below come from the plan, the artifacts or the rule.",
-      planningPending: "Workflow Planning has not finished yet: the later conditional stages are not decided.",
+      planningPending: "There is no execution plan yet (inception/plans/execution-plan.md): it is written in Workflow Planning, which has not finished. Until then the later CONDITIONAL stages stay “under analysis” and the ALWAYS ones show “will run · ALWAYS rule”, because the v1 rule always runs them.",
       kind_always: "ALWAYS", kind_conditional: "CONDITIONAL", kind_placeholder: "PLACEHOLDER", perUnit: "PER UNIT",
       gate_approval: "explicit approval", gate_auto: "proceeds automatically", gate_none: "no gate",
-      dec_run: "Will run", dec_skip: "Skipped", dec_pending: "To be decided", dec_unrecorded: "Not recorded", dec_placeholder: "Placeholder",
-      st_done: "Done", st_current: "Current stage", st_progress: "Artifacts generated", st_pending: "Not started", st_skipped: "Does not run", st_placeholder: "Not implemented yet",
+      dec_run: "Will run", dec_skip: "Skipped", dec_pending: "Under analysis", dec_unrecorded: "Not recorded", dec_placeholder: "Placeholder",
+      st_done: "Done", st_current: "Current stage", st_awaiting: "Generated, awaiting approval", st_progress: "Artifacts generated", st_pending: "Not started", st_skipped: "Does not run", st_placeholder: "Not implemented yet",
       srcState: "aidlc-state.md", srcPlan: "execution-plan.md", srcSummary: "plan summary", srcArtifacts: "artifacts found", srcRule: "workflow rule", srcInferred: "inferred: later stages ran without it", planWhy: "plan rationale",
-      srcPendingAt: "decided at {stage}", srcNone: "not recorded",
+      srcPendingAt: "to be defined in {stage}", dec_run_rule: "Will run · ALWAYS rule", srcNone: "not recorded",
       changed: "Decision changed after planning: the plan said “{plan}”, the current state says “{state}”.",
       why: "Rationale", note: "Note", source: "Decision source",
       does: "What it does", execIf: "Runs if", skipIf: "Skipped if", outputs: "Outputs", units: "Units", noUnits: "No unit under construction/ yet.",
@@ -1201,16 +1244,16 @@
     es: {
       tab: "Proceso", title: "Workflow AI-DLC v1.0.1 · 3 fases · 14 etapas",
       intro: "Toda solicitud empieza en Workspace Detection. Las etapas ALWAYS se ejecutan siempre; las CONDITIONAL solo cuando Workflow Planning decide que aportan valor, y esa decisión puede cambiar después. Construction repite las etapas de diseño y código para cada unidad de trabajo.",
-      sumRun: "se ejecutarán", sumSkip: "omitidas", sumPending: "por decidir", sumPlaceholder: "placeholder",
+      sumRun: "se ejecutarán", sumSkip: "omitidas", sumPending: "en análisis", sumPlaceholder: "placeholder",
       progress: "{done} de {total} etapas que se ejecutan ya completadas",
       noState: "Sin aidlc-state.md: las decisiones de abajo vienen del plan, de los artefactos o de la regla.",
-      planningPending: "Workflow Planning aún no terminó: las etapas condicionales posteriores no están decididas.",
+      planningPending: "Todavía no hay plan de ejecución (inception/plans/execution-plan.md): se escribe en Workflow Planning, que aún no terminó. Hasta entonces las etapas CONDITIONAL siguientes quedan “en análisis” y las ALWAYS muestran “se ejecutará · regla ALWAYS”, porque la regla del v1 siempre las ejecuta.",
       kind_always: "ALWAYS", kind_conditional: "CONDITIONAL", kind_placeholder: "PLACEHOLDER", perUnit: "POR UNIDAD",
       gate_approval: "aprobación explícita", gate_auto: "avanza automáticamente", gate_none: "sin gate",
-      dec_run: "Se ejecutará", dec_skip: "Omitida", dec_pending: "Por decidir", dec_unrecorded: "Sin registro", dec_placeholder: "Placeholder",
-      st_done: "Completada", st_current: "Etapa actual", st_progress: "Artefactos generados", st_pending: "No iniciada", st_skipped: "No se ejecuta", st_placeholder: "Aún no implementada",
+      dec_run: "Se ejecutará", dec_skip: "Omitida", dec_pending: "En análisis", dec_unrecorded: "Sin registro", dec_placeholder: "Placeholder",
+      st_done: "Completada", st_current: "Etapa actual", st_awaiting: "Generada, esperando aprobación", st_progress: "Artefactos generados", st_pending: "No iniciada", st_skipped: "No se ejecuta", st_placeholder: "Aún no implementada",
       srcState: "aidlc-state.md", srcPlan: "execution-plan.md", srcSummary: "resumen del plan", srcArtifacts: "artefactos encontrados", srcRule: "regla del workflow", srcInferred: "inferido: las etapas siguientes se ejecutaron sin ella", planWhy: "motivo en el plan",
-      srcPendingAt: "se decide en {stage}", srcNone: "no registrado",
+      srcPendingAt: "se definirá en {stage}", dec_run_rule: "Se ejecutará · regla ALWAYS", srcNone: "no registrado",
       changed: "Decisión cambiada después del plan: el plan decía “{plan}”, el estado actual dice “{state}”.",
       why: "Motivo", note: "Nota", source: "Fuente de la decisión",
       does: "Qué hace", execIf: "Se ejecuta si", skipIf: "Se omite si", outputs: "Salidas", units: "Unidades", noUnits: "Aún no hay unidades en construction/.",
@@ -1335,7 +1378,9 @@
         n++;
         const s = r.s, tx = procText(s.id);
         const gateIcon = s.gate === "approval" ? "🔒" : s.gate === "auto" ? "⏩" : "⏸";
-        const srcLabel = r.source === "srcPendingAt" ? pt_("srcPendingAt", { stage: procName(s.decidedAt || "workflow-planning") }) : pt_(r.source);
+        const decider = s.decidedAt || "workflow-planning";
+        const srcLabel = r.source === "srcPendingAt" ? pt_("srcPendingAt", { stage: `${procName(decider)} (${PROC_STAGES.findIndex(x => x.id === decider) + 1})` }) : pt_(r.source);
+        const decLabel = (r.decision === "run" && r.source === "srcRule" && !P.planningDone) ? pt_("dec_run_rule") : pt_("dec_" + r.decision);
         const list = (k, arr) => arr && arr.length ? `<div class="proc-sec"><h3>${esc(pt_(k))}</h3><ul>${arr.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
         const outs = r.outputs.length ? `<div class="proc-sec"><h3>${esc(pt_("outputs"))}</h3><ul class="proc-outs">${r.outputs.map(o =>
           `<li class="${o.file ? "has" : ""}">${o.file ? "✓" : "○"} <code>${esc(o.path)}</code> ${o.file ? `<button class="btn ghost proc-open" data-open="${esc(o.file.rel)}">${esc(pt_("open"))}</button>` : `<span class="stage-meta">${esc(pt_("missing"))}</span>`}</li>`).join("")}</ul></div>` : "";
@@ -1345,7 +1390,7 @@
           : (r.note ? `<div class="proc-reason"><b>${esc(pt_("note"))}:</b> ${esc(r.note)}</div>` : "");
         const changed = r.changed ? `<div class="proc-changed">⚠ ${esc(pt_("changed", { plan: pt_("dec_" + r.planDecision), state: pt_("dec_" + r.stateDecision) }))}${r.planRationale ? ` <span class="stage-meta">(${esc(pt_("planWhy"))}: ${esc(r.planRationale)})</span>` : ""}</div>` : "";
         html += `<li class="proc-stage dec-${r.decision} st-${r.status}">
-          <details${r.status === "current" ? " open" : ""}><summary>
+          <details${r.status === "current" || r.status === "awaiting" ? " open" : ""}><summary>
             <span class="proc-num">${n}</span>
             <span class="proc-main">
               <span class="proc-title">${esc(s.name)} <code class="proc-slug">${esc(s.id)}</code></span>
@@ -1353,7 +1398,7 @@
               ${reason}${changed}
             </span>
             <span class="proc-right">
-              <span class="proc-dec ${r.decision}">${esc(pt_("dec_" + r.decision))}</span>
+              <span class="proc-dec ${r.decision}">${esc(decLabel)}</span>
               <span class="proc-st">${esc(pt_("st_" + r.status))}</span>
               <span class="stage-meta">${esc(pt_("source"))}: ${esc(srcLabel)}</span>
             </span>
@@ -1382,7 +1427,7 @@
     $("pickBtnTop").textContent = t("switchFolder");
     $("rootChip").textContent = STATE.rootLabel;
     $("scanMeta").textContent = t("filesRead", { n: STATE.count });
-    const pendingQ = STATE.qItems.filter(q => !q.answered).length;
+    const pendingQ = STATE.qItems.filter(q => !q.answered && !q.closed).length;
     const qp = $("qPip"); qp.textContent = STATE.qItems.length ? (pendingQ ? pendingQ + " ⬜" : "✓") : "0";
     qp.className = "pip" + (pendingQ ? " warn" : "");
     renderOverview(); renderProcessTab(); renderPhasesTab(); renderQuestionsTab(); renderFilesTab(); renderTokensTab();
@@ -1400,15 +1445,15 @@
     const allStages = phases.flatMap(p => p.stages);
     const totalCb = allStages.reduce((a, s) => a + s.total, 0), doneCb = allStages.reduce((a, s) => a + s.done, 0);
     const stagesDone = allStages.filter(s => s.status === "done").length;
-    const stagesActive = allStages.filter(s => s.status !== "skipped").length;
-    const pendingQ = qItems.filter(q => !q.answered).length;
+    const stagesActive = allStages.filter(s => s.status !== "skipped" && s.status !== "analysis").length;
+    const pendingQ = qItems.filter(q => !q.answered && !q.closed).length;
     const phasePills = phases.map(p => {
       const icon = p.status === "done" ? "✓" : p.status === "active" ? "●" : "○";
       return `<div class="stat-box">
         <div style="display:flex;align-items:center;gap:8px">
           <span class="phase-icon ${p.status}" style="width:26px;height:26px">${icon}</span>
           <div><div style="font-weight:700;font-size:.9rem">${p.icon} ${esc(p.name)}</div>
-          <div class="stat-sub">${p.pct}% · ${t("activeStages", { n: p.stages.filter(s=>s.status!=="skipped").length })}</div></div>
+          <div class="stat-sub">${p.pct}% · ${t("activeStages", { n: p.stages.filter(s=>s.status!=="skipped"&&s.status!=="analysis").length })}</div></div>
         </div>
         <div class="progress-container" style="margin:8px 0 0"><div class="progress-bar" style="width:${p.pct}%;background:var(--${p.cssClass})"></div></div>
       </div>`;
@@ -1471,12 +1516,12 @@
   function renderQuestionsTab() {
     const q = STATE.qItems;
     if (!q.length) { $("tab-questions").innerHTML = `<div class="card"><h3>${t("questionsTitle")}</h3><div class="empty-note">${t("noAnswerTags")}</div></div>`; return; }
-    const pending = q.filter(x => !x.answered), answered = q.filter(x => x.answered);
-    const show = pending.concat(answered);
+    const pending = q.filter(x => !x.answered && !x.closed), answered = q.filter(x => x.answered), closed = q.filter(x => x.closed);
+    const show = pending.concat(answered, closed);
     $("tab-questions").innerHTML = `<div class="card">
-      <div class="card-header"><h3 style="margin:0">${t("questionsTitle")}</h3><span class="pill">${t("qCounts", { p: pending.length, a: answered.length })}</span></div>
-      ${show.map(x => `<div class="q-item"><span class="q-mark">${x.answered ? "✅" : "⬜"}</span>
-        <span class="q-text">${esc(x.q)} ${x.answered ? `<span class="pill">${t("respPrefix")} ${esc(x.answer.slice(0,40))}</span>` : ""}<div class="q-src">${esc(x.src)}</div></span></div>`).join("")}
+      <div class="card-header"><h3 style="margin:0">${t("questionsTitle")}</h3><span class="pill">${t("qCounts", { p: pending.length, a: answered.length })}${closed.length ? " · " + t("qClosedCount", { c: closed.length }) : ""}</span></div>
+      ${show.map(x => `<div class="q-item"><span class="q-mark">${x.answered ? "✅" : x.closed ? "➖" : "⬜"}</span>
+        <span class="q-text">${esc(x.q)} ${x.answered ? `<span class="pill">${t("respPrefix")} ${esc(x.answer.slice(0,40))}</span>` : x.closed ? `<span class="pill">${t("qClosed")}</span>` : ""}<div class="q-src">${esc(x.src)}</div></span></div>`).join("")}
     </div>`;
   }
 

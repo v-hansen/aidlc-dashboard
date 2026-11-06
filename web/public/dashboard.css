@@ -652,3 +652,10 @@ button:focus-visible, [tabindex]:focus-visible {
   padding: 4px 9px; font-size: 0.85rem; cursor: pointer; line-height: 1.2;
 }
 .theme-btn:hover { border-color: var(--accent); }
+
+/* mensagem de erro na página (substitui alert) */
+.ui-error {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1000; max-width: min(480px, calc(100vw - 32px));
+  padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--red);
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-size: 0.85rem; cursor: pointer;
+}

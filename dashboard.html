@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-WB7X10vZBI0OOpE2OSfXLvIpQtdyJUayf3zCnjU5Drg=' 'sha256-zxgrIRnBnfD6Fp9R26liLWR5zQRrs29ZH2XtpDs9TwA=' 'sha256-3lEP+COXZ4Bgm8jxKMgU/WpT3PuhUKVs5QfO6b4LO6c=' 'sha256-Fz11PXvl0ce5tHvDJfiwFhTBWN9URPW0GOwdEurmF2Y=' 'sha256-ldE97bHCPOf8GciQEVxPTeaIWkDt6tXe+cv21MzYA4s=' 'sha256-NEeVuY/hlWH4wAdARtERZYpQijy6Z+9V3zPfLsR+Wbs=' 'sha256-CncDuUbE9lv+Lkhplev2aEuqCVAkTA23Is6Zh/k4KKc=' 'sha256-3hWzWqYQ33QHhom//VbB6sZj1Id0iWhUfNDrgLsUI/U=' 'sha256-a8mHuaY1BPfb/thSkB4rdhDtCVPFOuizFXrh9SjvI+s=' 'sha256-uNvd+z2zWGSmHdpMUTW0PxUV5fOzQUA4PSdXjBB9q8U=' 'sha256-ACZ+VFmc4XA9dJ+YkK5JFrnof4KLNVDdJJ2HTA3mj90=' 'sha256-NXYKMsfpiLIhDXoN9teI7vWL4hd4wJc4DmrY1izEPro=' 'sha256-2Ww1qWZXhWmiBMEyNpX0bjS4/mZnGiX0/ROivktcpvo=' 'sha256-o7hH2M3j1tTQlpKw3Lo+Wtxxrf+3k1oJyxq+E50Zxbc=' 'sha256-VcAUUGGEZcFsdmeY+tgHsSfYZU7nReK7VNl+Txfvq8w=' 'sha256-DI6yFo8ElBQ8ulIUY27vxE+09PtswuyB/qwFUFHipfA=' 'sha256-043ZumBOGkfZqCuM33FOvZ6f4aoJfKb0ndR4VvetXDg=' 'sha256-cBl21vQGuYJCVWh8qySan2FO6Yz5gbY2yrrBkeoTXoU=' 'sha256-eALIiDoqWk+L9+fNYxi0zNl8HfgL4bj/RQPkrQQRkjQ=' 'sha256-PxtIM7D9G0cz5BG6qi4ZU3x3KnG9oWy5xXfa3BJtgWM=' 'sha256-BW7eRoWIV4mNMpOWOYeGIFqNpbxGq7ZFHNgPW7sRygA=' 'sha256-d8fwfj1AzXWGzFZLMWyTNoBWFP21qaDgD3Gu+sT2pBc=' 'sha256-SqYKLSVKlNJPf0OTwN5g0HGWZVrfag15UJpdDy0Fqy8=' 'sha256-uoJ2ADJqkf7+1EVe2c0bUgrJ/V08dpg2YIZBrlXrEPA=' 'sha256-IWJkrm0i8o1OizOzQjfiEz7KiuPv+7FBXwg4GMUSdWo=' 'sha256-VhPUqhktn6aUDccZ545C9X9hAscRbz2ioD7sPAcwOGw='; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; object-src 'none'; base-uri 'none'; form-action 'none'"><!-- pragma: allowlist secret -->
 <title>AI-DLC Dashboard</title>
 <style>
 :root {
@@ -659,6 +660,13 @@ button:focus-visible, [tabindex]:focus-visible {
   padding: 4px 9px; font-size: 0.85rem; cursor: pointer; line-height: 1.2;
 }
 .theme-btn:hover { border-color: var(--accent); }
+
+/* mensagem de erro na página (substitui alert) */
+.ui-error {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1000; max-width: min(480px, calc(100vw - 32px));
+  padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--red);
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-size: 0.85rem; cursor: pointer;
+}
 </style>
 </head>
 <body>
@@ -4331,6 +4339,71 @@ function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c =>
     ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 }
+
+// num: counters read from project JSON (runtime-graph.json) are rendered only as numbers
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Ações da UI sem handlers inline: o markup leva data-act (nome de uma ação desta lista)
+// e data-args (JSON escapado), e um único listener delegado chama a função. Sem atributos de evento inline,
+// a página roda com uma CSP que proíbe script inline, então um texto injetado não executa.
+// '$event' e '$this' nos argumentos viram o evento e o elemento.
+const UI_ACTIONS = new Set([
+  'closeModal', 'kbCancelEdit', 'kbConfirmDelete', 'kbDoDelete', 'kbNewFile', 'kbOpen', 'kbOpenEdit',
+  'kbSave', 'kbSelectExpert', 'openAidlcFile', 'openFolder', 'openTokensFolder', 'refreshData',
+  'reloadTokensTab', 'selectIntent', 'setLang', 'setTheme', 'setWfScope', 'showPhaseInfo',
+  'showStageInfo', 'switchTab', 'toggleAutoRefresh', 'toggleTokenAutoRefresh', 'toggleUbGrid',
+]);
+// Único ponto que insere HTML na página. Todo HTML passado aqui é montado pelos renderers
+// com os dados dos arquivos passados por esc(); a CSP da página (sem script inline, sem
+// handlers inline) impede que um texto que escape disso execute.
+function setHTML(el, html) {
+  if (el) el.innerHTML = html;
+}
+// Mensagem de erro na página, sem showError(); o texto entra como textContent.
+function showError(msg) {
+  if (typeof document === 'undefined' || !document.body) return;
+  let box = document.getElementById('ui-error');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'ui-error';
+    box.className = 'ui-error';
+    box.setAttribute('role', 'alert');
+    box.addEventListener('click', () => box.remove());
+    document.body.appendChild(box);
+  }
+  box.textContent = String(msg);
+  clearTimeout(showError._t);
+  showError._t = setTimeout(() => box.remove(), 8000);
+}
+function act(name, ...args) {
+  return `data-act="${esc(name)}" data-args="${esc(JSON.stringify(args))}"`;
+}
+function runUiAction(el, ev) {
+  const name = el.getAttribute('data-act');
+  // as funções são globais e podem ser trocadas pelo bridge (extensão/web): resolve na hora
+  const fn = UI_ACTIONS.has(name) ? globalThis[name] : null;
+  if (typeof fn !== 'function') return;
+  let args = [];
+  try { args = JSON.parse(el.getAttribute('data-args') || '[]'); } catch { return; }
+  if (!Array.isArray(args)) return;
+  fn(...args.map(a => (a === '$event' ? ev : a === '$this' ? el : a)));
+}
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('click', (ev) => {
+    const el = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (!el || el.getAttribute('data-on')) return;               // data-on: outro evento
+    if (el.getAttribute('data-self') === '1' && ev.target !== el) return; // ex.: fundo do modal
+    runUiAction(el, ev);
+  });
+  // 'toggle' de <details> não sobe na árvore: escuta na fase de captura
+  document.addEventListener('toggle', (ev) => {
+    const el = ev.target;
+    if (el && el.getAttribute && el.getAttribute('data-on') === 'toggle' && el.hasAttribute('data-act')) runUiAction(el, ev);
+  }, true);
+}
 // safeRender: isola erro de uma aba para não derrubar o dashboard inteiro
 function safeRender(fn, ...args) {
   try { return fn(...args); }
@@ -4353,10 +4426,10 @@ function setLang(l) {
   lang = l;
   try { localStorage.setItem('aidlc-dash-lang', l); } catch {}
   if (dashboardData) {
-    document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+    setHTML(document.getElementById('app'), renderDashboard(dashboardData));
     switchTab(activeTab);
   } else {
-    document.getElementById('app').innerHTML = renderLoadScreen();
+    setHTML(document.getElementById('app'), renderLoadScreen());
   }
 }
 // Tema claro/escuro: escolha salva > tema do editor (webview) > preferência do SO
@@ -4382,10 +4455,10 @@ function setTheme(th) {
   applyTheme(th);
   try { localStorage.setItem('aidlc-dash-theme', theme); } catch {}
   if (dashboardData) {
-    document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+    setHTML(document.getElementById('app'), renderDashboard(dashboardData));
     switchTab(activeTab);
   } else {
-    document.getElementById('app').innerHTML = renderLoadScreen();
+    setHTML(document.getElementById('app'), renderLoadScreen());
   }
 }
 if (typeof document !== 'undefined') {
@@ -4399,15 +4472,15 @@ function renderLangSelector() {
   const next = theme === 'light' ? 'dark' : 'light';
   const label = t(next === 'light' ? 'themeToLight' : 'themeToDark');
   return '<div class="lang-bar">' + [['pt','PT'],['en','EN'],['es','ES']].map(([l,label]) =>
-    `<button class="lang-btn ${l===lang?'selected':''}" onclick="setLang('${l}')">${label}</button>`
-  ).join('') + `<button class="theme-btn" onclick="setTheme('${next}')" title="${esc(label)}" aria-label="${esc(label)}">${next === 'light' ? '☀' : '☾'}</button></div>`;
+    `<button class="lang-btn ${l===lang?'selected':''}" ${act('setLang', l)}>${label}</button>`
+  ).join('') + `<button class="theme-btn" ${act('setTheme', next)} title="${esc(label)}" aria-label="${esc(label)}">${next === 'light' ? '☀' : '☾'}</button></div>`;
 }
 </script>
 
 <script>
 // PART 1: Data structures and constants
 // Substituído pelo build.js com a versão do aidlc-dashboard-extension/package.json
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 
 const PHASES = [
   { id:'initialization', stages:['workspace-scaffold','workspace-detection','state-init'] },
@@ -4690,7 +4763,9 @@ function parseState(stateMarkdown) {
   // Lê "- **Key**: value" só na mesma linha: um campo vazio (ex.: "**Worktree Path**:")
   // não pode roubar o valor da linha seguinte.
   const getVal = (key) => {
-    const rx = new RegExp(`\\*\\*${key}\\*\\*:[ \\t]*([^\\n]*)`);
+    // as chaves são nomes fixos de campo; escapa mesmo assim para o RegExp nunca ver metacaracteres
+    const k = String(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(`\\*\\*${k}\\*\\*:[ \\t]*([^\\n]*)`);
     const m = stateMarkdown.match(rx);
     return m ? m[1].trim() : '';
   };
@@ -4799,7 +4874,7 @@ function renderLoadScreen() {
       <div class="header-logo">🔬</div>
       <h1>AI-DLC Dashboard</h1>
       <p class="load-desc">${t('loadDesc')}</p>
-      <button class="load-btn" onclick="openFolder()">${t('openBtn')}</button>
+      <button class="load-btn" ${act('openFolder')}>${t('openBtn')}</button>
       <p style="color:var(--text-muted);font-size:0.75rem;margin-top:8px;">${t('compatNote')}</p>
     </div>
   `;
@@ -4813,10 +4888,10 @@ function renderDashboard(data) {
         <div class="header-logo">🔎</div>
         <h1>${t('naTitle')}</h1>
         <p class="load-desc">${t('naDesc')}</p>
-        <button class="load-btn" onclick="openFolder()">${t('openBtn')}</button>
+        <button class="load-btn" ${act('openFolder')}>${t('openBtn')}</button>
       </div>`;
   }
-  if (data.error) return `<div class="empty-state"><h2>${t('errTitle')}</h2><p>${data.error}</p></div>`;
+  if (data.error) return `<div class="empty-state"><h2>${t('errTitle')}</h2><p>${esc(data.error)}</p></div>`;
   if (!data.intents.length) return `<div class="empty-state"><h2>${t('noWf')}</h2><p>${t('noWfDesc')}</p></div>`;
 
   const intent = currentIntent();
@@ -4830,7 +4905,7 @@ function renderDashboard(data) {
     for (const it of data.intents) {
       const isSel = it.dirName === intent.dirName;
       const stBadge = it.status === 'in-flight' ? '●' : it.status === 'completed' ? '✓' : '○';
-      intentSelector += `<button class="intent-chip ${isSel ? 'selected' : ''}" onclick="selectIntent('${esc(it.dirName)}')">${stBadge} ${esc(it.slug)}<small>${esc(it.dirName.split('-')[0])} · ${esc(it.scope)}</small></button>`;
+      intentSelector += `<button class="intent-chip ${isSel ? 'selected' : ''}" ${act('selectIntent', it.dirName)}>${stBadge} ${esc(it.slug)}<small>${esc(it.dirName.split('-')[0])} · ${esc(it.scope)}</small></button>`;
     }
     intentSelector += '</div>';
   }
@@ -4904,21 +4979,21 @@ function renderDashboard(data) {
 
     <div class="refresh-bar">
       <span id="refresh-indicator" class="refresh-indicator">${t('updatedAt')} ${new Date().toLocaleTimeString(LOCALES[lang] || 'en-US')}</span>
-      <button id="auto-refresh-btn" class="refresh-btn ${autoRefreshEnabled ? '' : 'paused'}" onclick="toggleAutoRefresh()">${autoRefreshEnabled ? t('btnPause') : t('btnResume')}</button>
-      <button class="refresh-btn" onclick="refreshData()">${t('btnRefresh')}</button>
+      <button id="auto-refresh-btn" class="refresh-btn ${autoRefreshEnabled ? '' : 'paused'}" ${act('toggleAutoRefresh')}>${autoRefreshEnabled ? t('btnPause') : t('btnResume')}</button>
+      <button class="refresh-btn" ${act('refreshData')}>${t('btnRefresh')}</button>
     </div>
 
     <div class="tab-bar" role="tablist">
-      <button class="tab-btn active" data-tab="workflow" role="tab" aria-selected="true" onclick="switchTab('workflow')">${t('tabWorkflow')}</button>
-      <button class="tab-btn" data-tab="phases" role="tab" aria-selected="false" onclick="switchTab('phases')">${t('tabPhases')}</button>
-      <button class="tab-btn" data-tab="stages" role="tab" aria-selected="false" onclick="switchTab('stages')">${t('tabStages')}</button>
-      <button class="tab-btn" data-tab="files" role="tab" aria-selected="false" onclick="switchTab('files')">${t('tabFiles')}</button>
-      <button class="tab-btn" data-tab="sensors" role="tab" aria-selected="false" onclick="switchTab('sensors')" hidden>${t('tabSensors')}</button>
-      <button class="tab-btn" data-tab="knowledge" role="tab" aria-selected="false" onclick="switchTab('knowledge')">${t('tabKnowledge')}</button>
-      <button class="tab-btn" data-tab="experts" role="tab" aria-selected="false" onclick="switchTab('experts')">${t('tabExperts')}</button>
-      <button class="tab-btn" data-tab="audit" role="tab" aria-selected="false" onclick="switchTab('audit')">${t('tabAudit')}</button>
-      <button class="tab-btn" data-tab="tokens" role="tab" aria-selected="false" onclick="switchTab('tokens')">${t('tabTokens')}</button>
-      <button class="tab-btn" data-tab="help" role="tab" aria-selected="false" onclick="switchTab('help')">${t('tabHelp')}</button>
+      <button class="tab-btn active" data-tab="workflow" role="tab" aria-selected="true" ${act('switchTab', 'workflow')}>${t('tabWorkflow')}</button>
+      <button class="tab-btn" data-tab="phases" role="tab" aria-selected="false" ${act('switchTab', 'phases')}>${t('tabPhases')}</button>
+      <button class="tab-btn" data-tab="stages" role="tab" aria-selected="false" ${act('switchTab', 'stages')}>${t('tabStages')}</button>
+      <button class="tab-btn" data-tab="files" role="tab" aria-selected="false" ${act('switchTab', 'files')}>${t('tabFiles')}</button>
+      <button class="tab-btn" data-tab="sensors" role="tab" aria-selected="false" ${act('switchTab', 'sensors')} hidden>${t('tabSensors')}</button>
+      <button class="tab-btn" data-tab="knowledge" role="tab" aria-selected="false" ${act('switchTab', 'knowledge')}>${t('tabKnowledge')}</button>
+      <button class="tab-btn" data-tab="experts" role="tab" aria-selected="false" ${act('switchTab', 'experts')}>${t('tabExperts')}</button>
+      <button class="tab-btn" data-tab="audit" role="tab" aria-selected="false" ${act('switchTab', 'audit')}>${t('tabAudit')}</button>
+      <button class="tab-btn" data-tab="tokens" role="tab" aria-selected="false" ${act('switchTab', 'tokens')}>${t('tabTokens')}</button>
+      <button class="tab-btn" data-tab="help" role="tab" aria-selected="false" ${act('switchTab', 'help')}>${t('tabHelp')}</button>
     </div>
 
     <div id="tab-workflow" class="tab-content active" role="tabpanel">${safeRender(renderWorkflowTab, state)}</div>
@@ -4965,11 +5040,11 @@ function renderPhasesTab(state, graph) {
     const doneCount = phase.stages.filter(s => state.stages?.[s]?.status === 'done').length;
 
     html += `
-      <li class="phase-item" onclick="showPhaseInfo(null,'${phase.id}')">
-        <div class="phase-icon ${iconClass}">${icon}</div>
+      <li class="phase-item" ${act('showPhaseInfo', null, phase.id)}>
+        <div class="phase-icon ${esc(iconClass)}">${icon}</div>
         <div class="phase-name">${phaseLabel(phase.id)}<br><small style="color:var(--text-muted)">${doneCount}/${stageCount} stages</small></div>
         <div class="phase-status">${statusLabel}</div>
-        <button class="info-btn" onclick="showPhaseInfo(event,'${phase.id}')" title="${t('phaseDetailsBtn')}">?</button>
+        <button class="info-btn" ${act('showPhaseInfo', '$event', phase.id)} title="${t('phaseDetailsBtn')}">?</button>
       </li>`;
   }
   html += '</ul>';
@@ -4995,15 +5070,15 @@ function renderStagesTab(state, graph) {
       if (action === 'SKIP' && status === 'pending') statusClass = 'skipped';
 
       html += `
-        <li class="stage-item ${statusClass}" onclick="showStageInfo(null,'${slug}')" style="cursor:pointer">
-          <span class="stage-dot ${statusClass}"></span>
+        <li class="stage-item ${esc(statusClass)}" ${act('showStageInfo', null, slug)} style="cursor:pointer">
+          <span class="stage-dot ${esc(statusClass)}"></span>
           <span class="stage-slug">
-            <strong>${slug}</strong><br>
+            <strong>${esc(slug)}</strong><br>
             <small style="color:var(--text-muted)">${stageDesc(slug)}</small>
           </span>
           <span class="stage-agent">${esc(agent.replace('aidlc-','').replace('-agent',''))}</span>
           <span class="stage-time">${duration}</span>
-          <button class="info-btn" onclick="showStageInfo(event,'${slug}')" title="${t('stageDetailsBtn')}" aria-label="${t('stageDetailsBtn')}: ${slug}">?</button>
+          <button class="info-btn" ${act('showStageInfo', '$event', slug)} title="${t('stageDetailsBtn')}" aria-label="${t('stageDetailsBtn')}: ${slug}">?</button>
         </li>`;
     }
     html += '</ul>';
@@ -5054,7 +5129,8 @@ function renderKnowledgeTab(data, state) {
     if (decided.length) {
       html += `<h3 style="margin-top:12px">${t('kDecisions')}</h3>`;
       for (const d of decided.slice(0, 8)) {
-        html += `<div class="knowledge-item">${esc(d.replace(/^- /,'').replace(/<!-- .+? -->/g,''))}</div>`;
+        // \x3C = '<': same regex, written so JS parsers do not read "<!--" as an HTML comment
+        html += `<div class="knowledge-item">${esc(d.replace(/^- /,'').replace(/\x3C!-- .+? -->/g,''))}</div>`;
       }
     }
     if (forbidden.length) {
@@ -5081,8 +5157,8 @@ function renderKnowledgeTab(data, state) {
     if (withLearnings.length) {
       html += `<div class="card"><h2>${t('kLearnCaptured')}</h2>`;
       for (const s of withLearnings) {
-        const total = s.learnings_captured.from_orchestrator + s.learnings_captured.from_user_addition;
-        html += `<div class="knowledge-item"><strong>${esc(WF_STAGE_LABEL[s.stage_slug] || s.stage_slug)}:</strong> ${tf('kLearnLine',{total, o:s.learnings_captured.from_orchestrator, u:s.learnings_captured.from_user_addition})}</div>`;
+        const total = num(s.learnings_captured.from_orchestrator) + num(s.learnings_captured.from_user_addition);
+        html += `<div class="knowledge-item"><strong>${esc(WF_STAGE_LABEL[s.stage_slug] || s.stage_slug)}:</strong> ${tf('kLearnLine',{total, o:num(s.learnings_captured.from_orchestrator), u:num(s.learnings_captured.from_user_addition)})}</div>`;
       }
       html += '</div>';
     }
@@ -5210,10 +5286,10 @@ async function openTokensFolder() {
     await loadTokenData();
     lastTokenRefresh = new Date();
     const el = document.getElementById('tab-tokens');
-    if (el) el.innerHTML = renderTokensTab();
+    if (el) setHTML(el, renderTokensTab());
     if (typeof startTokenRefresh === 'function') startTokenRefresh();
   } catch (err) {
-    if (err.name !== 'AbortError') alert(t('errRead') + err.message);
+    if (err.name !== 'AbortError') showError(t('errRead') + err.message);
   }
 }
 
@@ -5227,6 +5303,13 @@ async function collectJsonlFiles(dirHandle, depth, out) {
       await collectJsonlFiles(entry, depth + 1, out);
     }
   }
+}
+
+// Botão "atualizar" da aba Tokens: relê os transcripts e redesenha a aba
+async function reloadTokensTab() {
+  await loadTokenData();
+  setHTML(document.getElementById('tab-tokens'), renderTokensTab());
+  switchTab('tokens');
 }
 
 async function loadTokenData() {
@@ -5386,7 +5469,7 @@ function renderTokensTab() {
         <p style="color:var(--text-muted);font-size:0.85rem;max-width:460px;margin:8px auto 16px">
           ${t('tkDesc')}
         </p>
-        <button class="load-btn" onclick="openTokensFolder()">${t('tkOpenBtn')}</button>
+        <button class="load-btn" ${act('openTokensFolder')}>${t('tkOpenBtn')}</button>
         <div style="text-align:left;max-width:520px;margin:16px auto 0">
           <div class="help-card" style="margin-bottom:8px">
             <h4>${t('tkClaudeHintTitle')}</h4>
@@ -5412,7 +5495,7 @@ function renderTokensTab() {
   const hasKiro = tk.kiroSessions.length > 0;
   if (!hasClaude && !hasKiro) {
     html += `<div class="empty-state">${t('tkNoneFound')}</div>
-      <div style="text-align:center"><button class="refresh-btn" onclick="openTokensFolder()">${t('tkChangeFolder')}</button></div>`;
+      <div style="text-align:center"><button class="refresh-btn" ${act('openTokensFolder')}>${t('tkChangeFolder')}</button></div>`;
     return html;
   }
   if (hasClaude) {
@@ -5496,9 +5579,9 @@ function renderTokensTab() {
   }
   html += `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <button class="refresh-btn" onclick="loadTokenData().then(()=>{document.getElementById('tab-tokens').innerHTML=renderTokensTab();switchTab('tokens')})">${t('tkRefresh')}</button>
-      <button id="token-auto-btn" class="refresh-btn ${typeof tokenAutoRefresh !== 'undefined' && tokenAutoRefresh ? '' : 'paused'}" onclick="toggleTokenAutoRefresh()">${typeof tokenAutoRefresh !== 'undefined' && tokenAutoRefresh ? t('tkAutoOn') : t('tkAutoOff')}</button>
-      <button class="refresh-btn" onclick="openTokensFolder()">${t('tkChangeFolder')}</button>
+      <button class="refresh-btn" ${act('reloadTokensTab')}>${t('tkRefresh')}</button>
+      <button id="token-auto-btn" class="refresh-btn ${typeof tokenAutoRefresh !== 'undefined' && tokenAutoRefresh ? '' : 'paused'}" ${act('toggleTokenAutoRefresh')}>${typeof tokenAutoRefresh !== 'undefined' && tokenAutoRefresh ? t('tkAutoOn') : t('tkAutoOff')}</button>
+      <button class="refresh-btn" ${act('openTokensFolder')}>${t('tkChangeFolder')}</button>
       <span class="refresh-indicator" style="margin-left:auto">${typeof lastTokenRefresh !== 'undefined' && lastTokenRefresh ? t('updatedAt') + ' ' + lastTokenRefresh.toLocaleTimeString(LOCALES[lang] || 'en-US') : ''}</span>
     </div>`;
   return html;
@@ -5536,14 +5619,14 @@ const PHASE_DETAILS = {
 };
 
 function closeModal() {
-  document.getElementById('modal-root').innerHTML = '';
+  setHTML(document.getElementById('modal-root'), '');
 }
 
 function openModal(innerHtml) {
-  document.getElementById('modal-root').innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  setHTML(document.getElementById('modal-root'), `
+    <div class="modal-overlay" ${act('closeModal')} data-self="1">
       <div class="modal-box" role="dialog" aria-modal="true" tabindex="-1">${innerHtml}</div>
-    </div>`;
+    </div>`);
   const box = document.querySelector('.modal-box');
   if (box && box.focus) box.focus();
 }
@@ -5574,11 +5657,11 @@ function showPhaseInfo(ev, phaseId) {
       ? `${agent} · ${duration}${g.outcome === 'approved' ? ' · ' + t('mApprovedShort') : g.outcome === 'pending' ? ' · ' + t('mInProgress') : ''}`
       : (action === 'SKIP' ? t('mSkippedScope') : t('mNotStarted'));
     stagesHtml += `
-      <li class="stage-item ${statusClass}" onclick="showStageInfo(null,'${slug}')" style="cursor:pointer">
-        <span class="stage-dot ${statusClass}"></span>
-        <span class="stage-slug"><strong>${slug}</strong><br>
+      <li class="stage-item ${esc(statusClass)}" ${act('showStageInfo', null, slug)} style="cursor:pointer">
+        <span class="stage-dot ${esc(statusClass)}"></span>
+        <span class="stage-slug"><strong>${esc(slug)}</strong><br>
           <small style="color:var(--text-muted)">${executedInfo}</small></span>
-        <button class="info-btn" onclick="showStageInfo(event,'${slug}')">?</button>
+        <button class="info-btn" ${act('showStageInfo', '$event', slug)}>?</button>
       </li>`;
   }
   stagesHtml += '</ul>';
@@ -5586,7 +5669,7 @@ function showPhaseInfo(ev, phaseId) {
   openModal(`
     <div class="modal-header">
       <h2 style="margin:0">${phaseLabel(phaseId)}</h2>
-      <button class="modal-close" onclick="closeModal()">✕</button>
+      <button class="modal-close" ${act('closeModal')}>✕</button>
     </div>
     <div class="modal-section"><span class="badge badge-blue">${statusLabel}</span></div>
     <div class="modal-section"><h4>${t('mWhatPhase')}</h4><p>${phaseDetail(phaseId)}</p></div>
@@ -5622,14 +5705,14 @@ function showStageInfo(ev, slug) {
     if (g.memory_breakdown) {
       const mb = g.memory_breakdown;
       execHtml += `<div class="modal-section"><h4>${t('mMemory')}</h4><ul>
-        <li>${mb.interpretations} ${t('mInterp')}</li>
-        <li>${mb.deviations} ${t('mDeviations')}</li>
-        <li>${mb.tradeoffs} ${t('mTradeoffs')}</li>
-        <li>${mb.open_questions} ${t('mOpenQ')}</li>
+        <li>${num(mb.interpretations)} ${t('mInterp')}</li>
+        <li>${num(mb.deviations)} ${t('mDeviations')}</li>
+        <li>${num(mb.tradeoffs)} ${t('mTradeoffs')}</li>
+        <li>${num(mb.open_questions)} ${t('mOpenQ')}</li>
       </ul></div>`;
     }
     if (g.learnings_captured && (g.learnings_captured.from_orchestrator + g.learnings_captured.from_user_addition) > 0) {
-      execHtml += `<div class="modal-section"><h4>${t('mLearnings')}</h4><p>${tf('mLearningsLine',{o:g.learnings_captured.from_orchestrator, u:g.learnings_captured.from_user_addition})}</p></div>`;
+      execHtml += `<div class="modal-section"><h4>${t('mLearnings')}</h4><p>${tf('mLearningsLine',{o:num(g.learnings_captured.from_orchestrator), u:num(g.learnings_captured.from_user_addition)})}</p></div>`;
     }
   } else if (status === 'skipped') {
     execHtml = `<div class="modal-section"><h4>${t('mExec')}</h4><p>${tf('mSkippedLong',{scope: esc(state.scope || '')})}</p></div>`;
@@ -5639,10 +5722,10 @@ function showStageInfo(ev, slug) {
 
   openModal(`
     <div class="modal-header">
-      <h2 style="margin:0">${slug}</h2>
-      <button class="modal-close" onclick="closeModal()">✕</button>
+      <h2 style="margin:0">${esc(slug)}</h2>
+      <button class="modal-close" ${act('closeModal')}>✕</button>
     </div>
-    <div class="modal-section"><span class="badge ${statusCls}">${statusLabel}</span></div>
+    <div class="modal-section"><span class="badge ${esc(statusCls)}">${statusLabel}</span></div>
     <div class="modal-section"><h4>${t('mWhatStage')}</h4><p>${stageDesc(slug) || t('noDesc')}</p></div>
     <div class="modal-section"><h4>${t('mAgentResp')}</h4><p>${info.agent || '—'}</p></div>
     ${execHtml}
@@ -5663,7 +5746,7 @@ function currentIntent() {
 
 function selectIntent(dirName) {
   selectedIntentDir = dirName;
-  document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+  setHTML(document.getElementById('app'), renderDashboard(dashboardData));
   switchTab(activeTab);
 }
 let autoRefreshEnabled = true;
@@ -5701,7 +5784,7 @@ async function loadFileTree() {
   } finally {
     fbLoading = false;
     const el = document.getElementById('tab-files');
-    if (el) { el.innerHTML = safeRender(renderFilesTab); if (activeTab === 'files') requestAnimationFrame(runMermaid); }
+    if (el) { setHTML(el, safeRender(renderFilesTab)); if (activeTab === 'files') requestAnimationFrame(runMermaid); }
   }
 }
 
@@ -5715,14 +5798,14 @@ async function openAidlcFile(path) {
   }
   fbSelectedPath = path;
   const el = document.getElementById('tab-files');
-  if (el) { el.innerHTML = safeRender(renderFilesTab); requestAnimationFrame(runMermaid); }
+  if (el) { setHTML(el, safeRender(renderFilesTab)); requestAnimationFrame(runMermaid); }
 }
 
 async function refreshData() {
   if (!rootDirHandle) return;
   try {
     dashboardData = await loadDashboardData(rootDirHandle);
-    document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+    setHTML(document.getElementById('app'), renderDashboard(dashboardData));
     switchTab(activeTab); // restore active tab after re-render
     const indicator = document.getElementById('refresh-indicator');
     if (indicator) indicator.textContent = t('updatedAt') + ' ' + new Date().toLocaleTimeString(LOCALES[lang] || 'en-US');
@@ -5772,7 +5855,7 @@ async function refreshTokens() {
     // Só re-renderiza se a aba de tokens estiver visível (evita trabalho invisível)
     if (activeTab === 'tokens') {
       const el = document.getElementById('tab-tokens');
-      if (el) el.innerHTML = safeRender(renderTokensTab);
+      if (el) setHTML(el, safeRender(renderTokensTab));
     }
   } catch (err) {
     console.warn('Falha ao atualizar tokens:', err);
@@ -5801,14 +5884,14 @@ function toggleTokenAutoRefresh() {
 async function openFolder() {
   try {
     rootDirHandle = await window.showDirectoryPicker({ mode: 'read' });
-    document.getElementById('app').innerHTML = `<div class="empty-state"><p>${t('loading')}</p></div>`;
+    setHTML(document.getElementById('app'), `<div class="empty-state"><p>${t('loading')}</p></div>`);
     dashboardData = await loadDashboardData(rootDirHandle);
-    document.getElementById('app').innerHTML = renderDashboard(dashboardData);
+    setHTML(document.getElementById('app'), renderDashboard(dashboardData));
     switchTab(activeTab);
     if (autoRefreshEnabled) startAutoRefresh();
   } catch (err) {
     if (err.name !== 'AbortError') {
-      alert(t('errRead') + err.message);
+      showError(t('errRead') + err.message);
     }
   }
 }
@@ -5825,16 +5908,16 @@ document.addEventListener('visibilitychange', () => {
 // Render inicial adiado para depois de todos os scripts (dicionários I18N incluídos)
 window.addEventListener('DOMContentLoaded', () => {
   if (!window.showDirectoryPicker) {
-    document.getElementById('app').innerHTML = `
+    setHTML(document.getElementById('app'), `
       <div class="load-area">
         <div class="header-logo">⚠️</div>
         <h1>${t('unsupportedTitle')}</h1>
         <p class="load-desc">${t('unsupportedDesc')}</p>
       </div>
-    `;
+    `);
     return;
   }
-  document.getElementById('app').innerHTML = renderLoadScreen();
+  setHTML(document.getElementById('app'), renderLoadScreen());
 });
 </script>
 
@@ -6468,7 +6551,7 @@ function renderWorkflowTab(state) {
     const g = scopeGateCount(scope, grid);
     const tag = SCOPE_META[scope]?.tag ? `<span class="wf-chip-tag">${SCOPE_META[scope].tag}</span>` : (SCOPE_GRID_BASE[scope] ? '' : `<span class="wf-chip-tag">${t('wfComposed')}</span>`);
     const realMark = scope === realScope ? ` <span class="wf-chip-real" title="${t('wfRealScope')}">●</span>` : '';
-    return `<button class="wf-chip ${scope === active ? 'active' : ''}" onclick="setWfScope('${esc(scope)}')" title="${g} ${t('wfGates')}">${esc(scope)}<span class="wf-chip-n">${n}</span>${tag}${realMark}</button>`;
+    return `<button class="wf-chip ${scope === active ? 'active' : ''}" ${act('setWfScope', scope)} title="${g} ${t('wfGates')}">${esc(scope)}<span class="wf-chip-n">${n}</span>${tag}${realMark}</button>`;
   }).join('');
 
   // Gate de verificação entre fases (a v2 roda um em cada fronteira, exceto Init→Ideation)
@@ -6490,7 +6573,7 @@ function renderWorkflowTab(state) {
         reason ? `${t('wfReason')}: ${reason}` : ''].filter(Boolean).join('\n');
       const badge = changed ? `<span class="wf-chg" aria-label="${esc(t('wfChangedLeg'))}">${exec ? '+' : '−'}</span>` : '';
       const stLabel = isReal && exec && (st === 'awaiting' || st === 'revising') ? `<div class="wf-st">${esc(t(st === 'awaiting' ? 'wfAwaiting' : 'wfRevising'))}</div>` : '';
-      return `<div class="wf-card ${cls}" data-slug="${esc(slug)}" title="${esc(tip)}" tabindex="0">
+      return `<div class="wf-card ${esc(cls)}" data-slug="${esc(slug)}" title="${esc(tip)}" tabindex="0">
         <div class="wf-num">${colIdx}.${si + 1}${badge}</div>
         <div class="wf-name">${esc(WF_STAGE_LABEL[slug] || (stageGraphMap() || {})[slug]?.name || slug)}</div>${stLabel}
       </div>`;
@@ -6553,7 +6636,7 @@ function renderWorkflowTab(state) {
   }
   if (ubModel && ubModel.mode === 'full') {
     return `${ubHtml}
-      <details class="ub-grid-toggle"${ubGridOpen ? ' open' : ''} ontoggle="toggleUbGrid(this)">
+      <details class="ub-grid-toggle"${ubGridOpen ? ' open' : ''} data-on="toggle" ${act('toggleUbGrid', '$this')}>
         <summary>${t('ubShowGrid')}</summary>${gridHtml}
       </details>`;
   }
@@ -6586,11 +6669,13 @@ function renderWorkSettings(state) {
     return `<span class="wf-set-src">${esc(text)}</span>`;
   };
   const onOff = (v) => /^on$/i.test(v) ? 'on' : /^off$/i.test(v) ? 'off' : '';
+  // classe do chip: só letras, dígitos e hífen (o valor vem do aidlc-state.md)
+  const guardCls = (v) => 'guard-' + String(v).toLowerCase().replace(/[^a-z0-9-]/g, '');
   const chip = (key, s, valueText, cls) => items.push(
-    `<div class="wf-set ${cls || ''}" title="${esc(t(key + 'Tip'))}"><span class="wf-set-k">${t(key)}</span><span class="wf-set-v">${esc(valueText)}</span>${src(s)}</div>`);
+    `<div class="wf-set ${esc(cls || '')}" title="${esc(t(key + 'Tip'))}"><span class="wf-set-k">${t(key)}</span><span class="wf-set-v">${esc(valueText)}</span>${src(s)}</div>`);
   if (state.plan) items.push(`<div class="wf-set plan" title="${esc(t('wfSetPlanTip'))}"><span class="wf-set-k">${t('wfSetPlan')}</span><span class="wf-set-v">${esc(state.plan)}</span></div>`);
-  if (S.guardPolicy) chip('wfSetGuard', S.guardPolicy, S.guardPolicy.value, 'guard-' + S.guardPolicy.value.toLowerCase());
-  else if (S.changeControl) chip('wfSetGuard', S.changeControl, S.changeControl.value, 'guard-' + S.changeControl.value.toLowerCase());
+  if (S.guardPolicy) chip('wfSetGuard', S.guardPolicy, S.guardPolicy.value, guardCls(S.guardPolicy.value));
+  else if (S.changeControl) chip('wfSetGuard', S.changeControl, S.changeControl.value, guardCls(S.changeControl.value));
   for (const [k, key] of [['planApproval', 'wfSetPlanApproval'], ['collaborators', 'wfSetCollab'], ['sensors', 'wfSetSensors'],
     ['learnings', 'wfSetLearnings'], ['summaryConfirmation', 'wfSetSummary']]) {
     const s = S[k]; if (!s) continue;
@@ -6614,7 +6699,7 @@ function setWfScope(scope) {
   if (el && typeof dashboardData !== 'undefined' && dashboardData) {
     const intent = currentIntent();
     const state = intent ? parseState(intent.state) : {};
-    el.innerHTML = safeRender(renderWorkflowTab, state);
+    setHTML(el, safeRender(renderWorkflowTab, state));
     requestAnimationFrame(drawWfEdges);
   }
 }
@@ -6865,7 +6950,7 @@ function renderTreeNodes(nodes) {
     } else {
       const sel = n.path === fbSelectedPath ? ' selected' : '';
       const icon = n.name.toLowerCase().endsWith('.json') ? '{ }' : n.name.toLowerCase().endsWith('.md') ? '📄' : '📃';
-      html += `<li class="fb-file${sel}" onclick="openAidlcFile('${esc(n.path)}')" title="${esc(n.path)}">${icon} ${esc(n.name)}</li>`;
+      html += `<li class="fb-file${sel}" ${act('openAidlcFile', n.path)} title="${esc(n.path)}">${icon} ${esc(n.name)}</li>`;
     }
   }
   return html + '</ul>';
@@ -7146,7 +7231,7 @@ function ubSegBar(items) {
     `<span style="background:${UB_COLOR[i.status] || UB_COLOR.queued}" title="${esc((i.n ? 'Bolt ' + i.n : i.name) + ' · ' + t('ubSt_' + i.status))}"></span>`).join('')}</div>`;
 }
 function ubBadge(status, text) {
-  return `<span class="ub-badge ub-${status}">${esc(text)}</span>`;
+  return `<span class="ub-badge ub-${esc(status)}">${esc(text)}</span>`;
 }
 function ubStatusIcon(s) { return s === 'done' ? '✓' : s === 'running' ? '⏳' : s === 'failed' ? '✗' : '○'; }
 
@@ -7159,7 +7244,7 @@ function renderUnitCard(u, m) {
   let foot = '';
   if (u.current) foot = `<div class="ub-unit-foot" style="color:var(--yellow)">● ${esc(WF_STAGE_LABEL[u.current] || u.current)}</div>`;
   else if (u.status === 'failed' && u.error) foot = `<div class="ub-unit-foot" style="color:var(--red)">✗ ${esc(u.error)}</div>`;
-  return `<div class="ub-unit ub-unit-${u.status}" title="${esc(u.desc)}">
+  return `<div class="ub-unit ub-unit-${esc(u.status)}" title="${esc(u.desc)}">
     <div class="ub-unit-head"><div class="ub-unit-name">${esc(u.name)}</div>${ubBadge(u.status, label)}</div>
     <div class="ub-unit-meta">${meta ? meta + ' · ' : ''}${deps}</div>
     <div class="ub-pills">${pills}</div>${foot}
@@ -7168,7 +7253,7 @@ function renderUnitCard(u, m) {
 
 function renderBoltTrack(m) {
   if (!m.bolts.length) return '';
-  const chips = m.bolts.map(b => `<div class="ub-bolt ub-bolt-${b.status}">
+  const chips = m.bolts.map(b => `<div class="ub-bolt ub-bolt-${esc(b.status)}">
       <div class="ub-bolt-head"><b>Bolt ${b.n}</b>${b.walking ? ` <span class="ub-ws" title="${t('ubWalking')}">🦴</span>` : ''}<span class="ub-bolt-st">${ubStatusIcon(b.status)}</span></div>
       ${b.title ? `<div class="ub-bolt-title">${esc(b.title)}</div>` : ''}
       <div class="ub-bolt-units">${b.units.length ? b.units.map(esc).join(', ') : '—'}</div>
@@ -7293,7 +7378,7 @@ function kbTotalFiles() { return kbData ? EXPERTS.reduce((a, e) => a + kbFilesOf
 // Re-renderiza apenas o painel da aba (preserva foco mínimo; roda mermaid no preview).
 function kbRerender() {
   const el = document.getElementById('tab-experts');
-  if (el) { el.innerHTML = safeRender(renderExpertsTab, dashboardData); requestAnimationFrame(runMermaid); }
+  if (el) { setHTML(el, safeRender(renderExpertsTab, dashboardData)); requestAnimationFrame(runMermaid); }
 }
 
 function renderExpertsTab(data) {
@@ -7314,7 +7399,7 @@ function renderExpertsTab(data) {
     const n = kbFilesOf(e.slug).length;
     const sel = e.slug === kbSelectedSlug ? ' selected' : '';
     const count = n ? `<span class="kb-badge">${n}</span>` : '<span class="kb-badge kb-badge-empty">0</span>';
-    side += `<div class="kb-expert${sel}" onclick="kbSelectExpert('${e.slug}')" title="${esc(e.slug)}">
+    side += `<div class="kb-expert${sel}" ${act('kbSelectExpert', e.slug)} title="${esc(e.slug)}">
       <span class="kb-ex-icon">${e.icon}</span>
       <span class="kb-ex-text"><strong>${esc(expertRole(e))}</strong><br><small>${esc(e.slug)}</small></span>
       ${count}
@@ -7355,7 +7440,7 @@ function renderExpertDetail() {
   let head = `<div class="kb-detail-head">
       <div><span class="kb-ex-icon">${e.icon}</span> <strong>${esc(expertRole(e))}</strong>
         <div class="kb-muted"><code>${esc(e.slug)}/</code> — ${loadNote}</div></div>
-      <button class="load-btn kb-new-btn" onclick="kbNewFile()">+ ${t('kbNew')}</button>
+      <button class="load-btn kb-new-btn" ${act('kbNewFile')}>+ ${t('kbNew')}</button>
     </div>`;
 
   let list;
@@ -7365,10 +7450,10 @@ function renderExpertDetail() {
     list = '<div class="kb-filelist">' + files.map(f => {
       const open = kbOpenFile && kbOpenFile.slug === e.slug && kbOpenFile.name === f.name;
       return `<div class="kb-file${open ? ' open' : ''}">
-        <span class="kb-file-name" onclick="kbOpen('${e.slug}','${esc(f.name)}')">📄 ${esc(f.name)}</span>
+        <span class="kb-file-name" ${act('kbOpen', e.slug, f.name)}>📄 ${esc(f.name)}</span>
         <span class="kb-file-size">${fmtBytes(f.bytes)}</span>
-        <button class="info-btn" title="${t('kbEdit')}" onclick="kbOpenEdit('${e.slug}','${esc(f.name)}')">✎</button>
-        <button class="info-btn kb-del" title="${t('kbDelete')}" onclick="kbConfirmDelete('${e.slug}','${esc(f.name)}')">🗑</button>
+        <button class="info-btn" title="${t('kbEdit')}" ${act('kbOpenEdit', e.slug, f.name)}>✎</button>
+        <button class="info-btn kb-del" title="${t('kbDelete')}" ${act('kbConfirmDelete', e.slug, f.name)}>🗑</button>
       </div>`;
     }).join('') + '</div>';
   }
@@ -7379,7 +7464,7 @@ function renderExpertDetail() {
     const content = kbContentCache[kbKey(kbOpenFile.slug, kbOpenFile.name)];
     viewer = `<div class="kb-viewer">
       <div class="kb-viewer-head">${esc(kbOpenFile.name)}
-        <button class="load-btn kb-edit-btn" onclick="kbOpenEdit('${e.slug}','${esc(kbOpenFile.name)}')">✎ ${t('kbEdit')}</button>
+        <button class="load-btn kb-edit-btn" ${act('kbOpenEdit', e.slug, kbOpenFile.name)}>✎ ${t('kbEdit')}</button>
       </div>
       <div class="kb-viewer-body fb-md">${content == null ? t('loading') : renderMarkdown(content)}</div>
     </div>`;
@@ -7404,8 +7489,8 @@ function renderKbEditor(e) {
     <label class="kb-label">${t('kbContent')}</label>
     <textarea id="kb-content" class="kb-textarea" spellcheck="false" placeholder="# Título&#10;...">${esc(content)}</textarea>
     <div class="kb-editor-actions">
-      <button class="load-btn" onclick="kbSave()">💾 ${t('kbSave')}</button>
-      <button class="refresh-btn" onclick="kbCancelEdit()">${t('kbCancel')}</button>
+      <button class="load-btn" ${act('kbSave')}>💾 ${t('kbSave')}</button>
+      <button class="refresh-btn" ${act('kbCancelEdit')}>${t('kbCancel')}</button>
     </div>
   </div>`;
 }
@@ -7469,8 +7554,8 @@ function kbConfirmDelete(slug, name) {
   openModal(`<h3 style="margin-top:0">${t('kbDelete')}</h3>
     <p>${tf('kbDeleteConfirm', { name: esc(name), slug: esc(slug) })}</p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-      <button class="refresh-btn" onclick="closeModal()">${t('kbCancel')}</button>
-      <button class="load-btn" style="background:var(--red)" onclick="kbDoDelete('${slug}','${esc(name)}')">🗑 ${t('kbDelete')}</button>
+      <button class="refresh-btn" ${act('closeModal')}>${t('kbCancel')}</button>
+      <button class="load-btn" style="background:var(--red)" ${act('kbDoDelete', slug, name)}>🗑 ${t('kbDelete')}</button>
     </div>`);
 }
 

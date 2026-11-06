@@ -101,7 +101,8 @@ In the standalone HTML, point the Tokens tab at your transcripts folder; the ext
 ## Notes
 
 - Everything runs **locally** — no data leaves your machine
-- Workflow files are treated as untrusted input (HTML-escaped before rendering)
+- Workflow files are treated as untrusted input (HTML-escaped before rendering); every flavor runs under a Content Security Policy that blocks inline script
+- This is sample code for demonstration and learning. It is not production-ready: review it, test it and add your own security controls before using it with real data or sharing it with other users
 - USD costs for Claude Code are estimates; for exact billing on AWS Bedrock, use Cost Explorer / CloudWatch
 
 ## License

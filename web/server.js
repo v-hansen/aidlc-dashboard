@@ -46,6 +46,21 @@ app.use((req, res, next) => {
   }
   next();
 });
+// Content Security Policy: scripts only from this server (no inline script, no inline event
+// handlers), network only back to this server (REST + WebSocket), no framing. Text that slips
+// past the renderers' escaping therefore cannot run.
+const CSP = [
+  "default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:", "font-src 'self' data:", "connect-src 'self'",
+  "object-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
+].join('; ');
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', CSP);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -497,13 +512,15 @@ async function listSpaces() {
   } catch { return ['default']; }
 }
 
+const SPACE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 function knowledgeRootFor(space) {
   const root = aidlcRoot();
   if (!root) return null;
-  // space is validated by the caller against listSpaces(); still strip any
-  // separators defensively so it can never climb out of spaces/.
-  const safeSpace = String(space || 'default').replace(/[\/\\]/g, '');
-  return path.join(root, 'spaces', safeSpace, 'knowledge');
+  // A space is one plain folder name under spaces/ (no separators, no ".."); anything
+  // else is refused instead of being cleaned up, so it can never climb out of spaces/.
+  const s = String(space || 'default');
+  if (!SPACE_NAME_RE.test(s) || s.includes('..')) return null;
+  return path.join(root, 'spaces', s, 'knowledge');
 }
 
 // Resolve + validate a single knowledge file location. Throws on any violation.
@@ -516,6 +533,12 @@ function sandboxKnowledge(space, slug, name) {
   if (typeof name !== 'string' || !KNOWLEDGE_NAME_RE.test(name)) {
     const err = new Error('invalid filename (use lowercase kebab-case ending in .md)');
     err.code = 'BAD_NAME';
+    throw err;
+  }
+  const s = String(space || 'default');
+  if (!SPACE_NAME_RE.test(s) || s.includes('..')) {
+    const err = new Error('invalid space name');
+    err.code = 'BAD_SPACE';
     throw err;
   }
   const kroot = knowledgeRootFor(space);
@@ -543,7 +566,8 @@ async function listKnowledge(requestedSpace) {
   const root = aidlcRoot();
   if (!root) return { error: 'No project selected' };
   const spaces = await listSpaces();
-  const space = spaces.includes(requestedSpace) ? requestedSpace : await getActiveSpace();
+  let space = spaces.includes(requestedSpace) ? requestedSpace : await getActiveSpace();
+  if (!knowledgeRootFor(space)) space = 'default'; // active-space file with an unusable name
   const kroot = knowledgeRootFor(space);
   let knowledgeExists = false;
   try { await fs.access(kroot); knowledgeExists = true; } catch { }
